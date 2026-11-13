@@ -1,0 +1,45 @@
+name: Build tvOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build tvOS Release app (unsigned)
+        run: |
+          xcodebuild \
+            -project TVBrowser.xcodeproj \
+            -scheme TVBrowser \
+            -configuration Release \
+            -sdk appletvos \
+            -destination 'generic/platform=tvOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CONFIGURATION_BUILD_DIR=build/Release-appletvos \
+            build
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Release-appletvos/TVBrowser.app Payload/
+          zip -r TVBrowser-tvOS.ipa Payload
+
+      - name: Upload TVBrowser-tvOS.ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: TVBrowser-tvOS-IPA
+          path: TVBrowser-tvOS.ipa
