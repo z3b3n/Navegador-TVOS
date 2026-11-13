@@ -9,6 +9,16 @@ final class AdBlocker {
         }
     }
 
+    private let allowedAuthHosts: Set<String> = [
+        "accounts.google.com",
+        "accounts.youtube.com",
+        "myaccount.google.com",
+        "apis.google.com",
+        "ssl.gstatic.com",
+        "www.gstatic.com",
+        "ogs.google.com"
+    ]
+
     private let blockedHosts: Set<String> = [
         "doubleclick.net",
         "googlesyndication.com",
@@ -53,6 +63,9 @@ final class AdBlocker {
         guard isEnabled else { return true }
         guard let host = url.host?.lowercased() else { return true }
 
+        if allowedAuthHosts.contains(host) {
+            return true
+        }
         if blockedHosts.contains(host) {
             return false
         }
@@ -69,10 +82,20 @@ final class AdBlocker {
             if (window.__tvBrowserAdBlockApplied) return;
             window.__tvBrowserAdBlockApplied = true;
 
-            // Block pop-ups via window.open
-            window.open = function() { return null; };
+            var host = (window.location && window.location.hostname || '').toLowerCase();
+            var isAuthHost = host.indexOf('accounts.google.') !== -1 || host.indexOf('myaccount.google.') !== -1;
 
-            // Hide common ad containers
+            if (!isAuthHost) {
+                var origOpen = window.open;
+                window.open = function(url) {
+                    if (url && typeof url === 'string' && url.indexOf('accounts.google.com') !== -1) {
+                        window.location.href = url;
+                        return window;
+                    }
+                    return null;
+                };
+            }
+
             var css = `
                 ins.adsbygoogle,
                 [id*="google_ads"],
@@ -83,8 +106,7 @@ final class AdBlocker {
                 [class*="adsbox"],
                 iframe[src*="doubleclick"],
                 iframe[src*="googlesyndication"],
-                .sponsored-content,
-                .popup-overlay {
+                .sponsored-content {
                     display: none !important;
                     visibility: hidden !important;
                     pointer-events: none !important;

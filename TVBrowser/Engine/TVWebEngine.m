@@ -9,9 +9,18 @@
 
 @implementation TVWebEngine
 
++ (NSString *)desktopUserAgent {
+    return @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15";
+}
+
 + (void)loadWebKitIfNeeded {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        // Register desktop User-Agent for UIWebView fallback as well
+        [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+            @"UserAgent": [TVWebEngine desktopUserAgent]
+        }];
+
         const char *paths[] = {
             "/System/Library/Frameworks/WebKit.framework/WebKit",
             "/System/Library/PrivateFrameworks/WebKit.framework/WebKit"
@@ -34,12 +43,28 @@
 
         if (wkClass && wkConfigClass) {
             id config = [[wkConfigClass alloc] init];
-            // Enable inline media playback if supported
+
             if ([config respondsToSelector:@selector(setAllowsInlineMediaPlayback:)]) {
                 ((void (*)(id, SEL, BOOL))objc_msgSend)(config, @selector(setAllowsInlineMediaPlayback:), YES);
             }
             if ([config respondsToSelector:@selector(setMediaTypesRequiringUserActionForPlayback:)]) {
                 ((void (*)(id, SEL, NSUInteger))objc_msgSend)(config, @selector(setMediaTypesRequiringUserActionForPlayback:), 0);
+            }
+
+            // Ensure persistent cookies/sessions for Google Sign-In
+            Class dataStoreClass = NSClassFromString(@"WKWebsiteDataStore");
+            if (dataStoreClass && [dataStoreClass respondsToSelector:@selector(defaultDataStore)] &&
+                [config respondsToSelector:@selector(setWebsiteDataStore:)]) {
+                id store = ((id (*)(id, SEL))objc_msgSend)(dataStoreClass, @selector(defaultDataStore));
+                ((void (*)(id, SEL, id))objc_msgSend)(config, @selector(setWebsiteDataStore:), store);
+            }
+
+            // Enable JS & window opening for OAuth flows
+            if ([config respondsToSelector:@selector(preferences)]) {
+                id prefs = ((id (*)(id, SEL))objc_msgSend)(config, @selector(preferences));
+                if ([prefs respondsToSelector:@selector(setJavaScriptCanOpenWindowsAutomatically:)]) {
+                    ((void (*)(id, SEL, BOOL))objc_msgSend)(prefs, @selector(setJavaScriptCanOpenWindowsAutomatically:), YES);
+                }
             }
 
             id allocView = [wkClass alloc];
@@ -53,16 +78,13 @@
             if ([wkView respondsToSelector:@selector(setUIDelegate:)]) {
                 ((void (*)(id, SEL, id))objc_msgSend)(wkView, @selector(setUIDelegate:), self);
             }
-            // Desktop-friendly Safari User-Agent for better tvOS compatibility
             if ([wkView respondsToSelector:@selector(setCustomUserAgent:)]) {
-                NSString *ua = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
-                ((void (*)(id, SEL, id))objc_msgSend)(wkView, @selector(setCustomUserAgent:), ua);
+                ((void (*)(id, SEL, id))objc_msgSend)(wkView, @selector(setCustomUserAgent:), [TVWebEngine desktopUserAgent]);
             }
 
             _webView = wkView;
             _isUsingWKWebView = YES;
         } else {
-            // Fallback to UIWebView compiled into UIKit on tvOS
             Class uiWebClass = NSClassFromString(@"UIWebView");
             if (uiWebClass) {
                 UIView *uiWeb = [[uiWebClass alloc] initWithFrame:frame];
@@ -77,7 +99,6 @@
                 _webView = uiWeb;
                 _isUsingWKWebView = NO;
             } else {
-                // Ultimate fallback placeholder view
                 _webView = [[UIView alloc] initWithFrame:frame];
                 _webView.backgroundColor = [UIColor darkGrayColor];
                 _isUsingWKWebView = NO;
@@ -127,9 +148,10 @@
 }
 
 - (void)loadURL:(NSURL *)url {
-    NSURLRequest *request = [NSURLRequest requestWithURL:url
-                                             cachePolicy:NSURLRequestUseProtocolCachePolicy
-                                         timeoutInterval:30.0];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
+                                                           cachePolicy:NSURLRequestUseProtocolCachePolicy
+                                                       timeoutInterval:30.0];
+    [request setValue:[TVWebEngine desktopUserAgent] forHTTPHeaderField:@"User-Agent"];
     if ([_webView respondsToSelector:@selector(loadRequest:)]) {
         ((void (*)(id, SEL, id))objc_msgSend)(_webView, @selector(loadRequest:), request);
     }
@@ -225,10 +247,9 @@
     }
 }
 
-#pragma mark - WKUIDelegate (Dynamic - Pop-up handling)
+#pragma mark - WKUIDelegate (Dynamic - Pop-up & Google OAuth handling)
 
 - (id)webView:(id)webView createWebViewWithConfiguration:(id)configuration forNavigationAction:(id)navigationAction windowFeatures:(id)windowFeatures {
-    // Open target="_blank" links in the same view if allowed, block pop-ups otherwise
     NSURL *url = nil;
     @try {
         url = [navigationAction valueForKeyPath:@"request.URL"];

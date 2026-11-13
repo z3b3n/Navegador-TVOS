@@ -71,10 +71,24 @@ final class InputController {
 
     func handlePressesBegan(_ presses: Set<UIPress>) -> Bool {
         var handled = false
+        let immediateStep: CGFloat = 22.0
         for press in presses {
             switch press.type {
-            case .upArrow, .downArrow, .leftArrow, .rightArrow:
+            case .upArrow:
                 activeDirections.insert(press.type)
+                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: 0, y: -immediateStep))
+                handled = true
+            case .downArrow:
+                activeDirections.insert(press.type)
+                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: 0, y: immediateStep))
+                handled = true
+            case .leftArrow:
+                activeDirections.insert(press.type)
+                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: -immediateStep, y: 0))
+                handled = true
+            case .rightArrow:
+                activeDirections.insert(press.type)
+                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: immediateStep, y: 0))
                 handled = true
             case .select:
                 delegate?.inputControllerDidClick()

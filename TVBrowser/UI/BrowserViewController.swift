@@ -7,27 +7,33 @@ final class BrowserViewController: UIViewController {
 
     private let toolbarContainer = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private let toolbarStack = UIStackView()
+    private let searchButton = UIButton(type: .system)
     private let urlButton = UIButton(type: .system)
     private let backButton = UIButton(type: .system)
     private let forwardButton = UIButton(type: .system)
     private let reloadButton = UIButton(type: .system)
+    private let zoomOutButton = UIButton(type: .system)
+    private let zoomInButton = UIButton(type: .system)
     private let bookmarkAddButton = UIButton(type: .system)
     private let bookmarksButton = UIButton(type: .system)
     private let historyButton = UIButton(type: .system)
+    private let exportButton = UIButton(type: .system)
     private let adBlockButton = UIButton(type: .system)
     private let modeButton = UIButton(type: .system)
     private let hideToolbarButton = UIButton(type: .system)
 
     private let statusBadge = UILabel()
-    private let loadingIndicator = UIActivityIndicatorView(style: .medium)
+    private let loadingIndicator = UIActivityIndicatorView(style: .large)
 
     private var toolbarVisible = false
     private var lastPanPoint: CGPoint = .zero
+    private var lastUsernameEntered: String = ""
+    private var isLoadingPage = false
     private let homeURL = URL(string: "https://www.google.com")!
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         if toolbarVisible {
-            return [urlButton]
+            return [searchButton]
         }
         return [view]
     }
@@ -61,76 +67,111 @@ final class BrowserViewController: UIViewController {
 
     private func setupToolbar() {
         toolbarContainer.translatesAutoresizingMaskIntoConstraints = false
-        toolbarContainer.layer.cornerRadius = 18
+        toolbarContainer.layer.cornerRadius = 22
+        toolbarContainer.layer.borderWidth = 1.5
+        toolbarContainer.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
         toolbarContainer.clipsToBounds = true
         toolbarContainer.isHidden = true
         toolbarContainer.alpha = 0
         view.addSubview(toolbarContainer)
+
+        let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.showsHorizontalScrollIndicator = false
+        toolbarContainer.contentView.addSubview(scroll)
 
         toolbarStack.axis = .horizontal
         toolbarStack.spacing = 14
         toolbarStack.alignment = .center
         toolbarStack.distribution = .fill
         toolbarStack.translatesAutoresizingMaskIntoConstraints = false
-        toolbarContainer.contentView.addSubview(toolbarStack)
+        scroll.addSubview(toolbarStack)
 
         NSLayoutConstraint.activate([
-            toolbarContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            toolbarContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 18),
             toolbarContainer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 32),
             toolbarContainer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -32),
-            toolbarContainer.heightAnchor.constraint(equalToConstant: 84),
+            toolbarContainer.heightAnchor.constraint(equalToConstant: 100),
 
-            toolbarStack.topAnchor.constraint(equalTo: toolbarContainer.contentView.topAnchor, constant: 10),
-            toolbarStack.bottomAnchor.constraint(equalTo: toolbarContainer.contentView.bottomAnchor, constant: -10),
-            toolbarStack.leadingAnchor.constraint(equalTo: toolbarContainer.contentView.leadingAnchor, constant: 20),
-            toolbarStack.trailingAnchor.constraint(equalTo: toolbarContainer.contentView.trailingAnchor, constant: -20)
+            scroll.topAnchor.constraint(equalTo: toolbarContainer.contentView.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: toolbarContainer.contentView.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: toolbarContainer.contentView.leadingAnchor, constant: 18),
+            scroll.trailingAnchor.constraint(equalTo: toolbarContainer.contentView.trailingAnchor, constant: -18),
+
+            toolbarStack.topAnchor.constraint(equalTo: scroll.topAnchor, constant: 12),
+            toolbarStack.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: -12),
+            toolbarStack.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
+            toolbarStack.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+            toolbarStack.heightAnchor.constraint(equalTo: scroll.heightAnchor, constant: -24)
         ])
 
+        configureButton(searchButton, title: "🔍 Buscar / URL", action: #selector(urlTapped), accent: true)
         configureButton(backButton, title: "◀", action: #selector(backTapped))
         configureButton(forwardButton, title: "▶", action: #selector(forwardTapped))
         configureButton(reloadButton, title: "↻", action: #selector(reloadTapped))
 
         configureButton(urlButton, title: "https://www.google.com", action: #selector(urlTapped))
         urlButton.contentHorizontalAlignment = .left
-        urlButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        urlButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
+        urlButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
+        urlButton.widthAnchor.constraint(lessThanOrEqualToConstant: 460).isActive = true
 
+        configureButton(zoomOutButton, title: "A-", action: #selector(zoomOutTapped))
+        configureButton(zoomInButton, title: "A+", action: #selector(zoomInTapped))
         configureButton(bookmarkAddButton, title: "★+", action: #selector(addBookmarkTapped))
         configureButton(bookmarksButton, title: "Marcadores", action: #selector(bookmarksTapped))
         configureButton(historyButton, title: "Historial", action: #selector(historyTapped))
+        configureButton(exportButton, title: "Exportar", action: #selector(exportTapped))
         configureButton(adBlockButton, title: "AdBlock: ON", action: #selector(adBlockTapped))
         configureButton(modeButton, title: "Modo: Cursor", action: #selector(modeTapped))
         configureButton(hideToolbarButton, title: "Navegar", action: #selector(hideToolbarTapped))
 
         [
-            backButton, forwardButton, reloadButton,
+            searchButton, backButton, forwardButton, reloadButton,
             urlButton,
-            bookmarkAddButton, bookmarksButton, historyButton,
+            zoomOutButton, zoomInButton,
+            bookmarkAddButton, bookmarksButton, historyButton, exportButton,
             adBlockButton, modeButton, hideToolbarButton
         ].forEach { toolbarStack.addArrangedSubview($0) }
 
         updateToolbarState()
     }
 
-    private func configureButton(_ button: UIButton, title: String, action: Selector) {
+    private func configureButton(_ button: UIButton, title: String, action: Selector, accent: Bool = false) {
         button.setTitle(title, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 22, weight: .semibold)
-        button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
-        button.layer.cornerRadius = 10
-        button.backgroundColor = UIColor.white.withAlphaComponent(0.12)
+        button.titleLabel?.font = .systemFont(ofSize: 25, weight: .semibold)
+        button.contentEdgeInsets = UIEdgeInsets(top: 14, left: 20, bottom: 14, right: 20)
+        button.layer.cornerRadius = 14
+        button.backgroundColor = accent ? UIColor.systemBlue.withAlphaComponent(0.75) : UIColor.white.withAlphaComponent(0.14)
         button.setTitleColor(.white, for: .normal)
         button.addTarget(self, action: action, for: .primaryActionTriggered)
     }
 
+    override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        coordinator.addCoordinatedAnimations({
+            if let prev = context.previouslyFocusedView as? UIButton, prev.isDescendant(of: self.toolbarContainer) {
+                prev.transform = .identity
+                prev.backgroundColor = (prev == self.searchButton)
+                    ? UIColor.systemBlue.withAlphaComponent(0.75)
+                    : UIColor.white.withAlphaComponent(0.14)
+                prev.setTitleColor(.white, for: .normal)
+            }
+            if let next = context.nextFocusedView as? UIButton, next.isDescendant(of: self.toolbarContainer) {
+                next.transform = CGAffineTransform(scaleX: 1.08, y: 1.08)
+                next.backgroundColor = .white
+                next.setTitleColor(.black, for: .normal)
+            }
+        }, completion: nil)
+    }
+
     private func setupStatusBadge() {
         statusBadge.translatesAutoresizingMaskIntoConstraints = false
-        statusBadge.backgroundColor = UIColor.black.withAlphaComponent(0.65)
+        statusBadge.backgroundColor = UIColor.black.withAlphaComponent(0.72)
         statusBadge.textColor = .white
-        statusBadge.font = .systemFont(ofSize: 20, weight: .medium)
+        statusBadge.font = .systemFont(ofSize: 23, weight: .medium)
         statusBadge.textAlignment = .center
-        statusBadge.layer.cornerRadius = 12
+        statusBadge.layer.cornerRadius = 14
         statusBadge.clipsToBounds = true
-        statusBadge.text = "  Cursor · Play/Pausa: Scroll · Menú: Atrás / Barra  "
         view.addSubview(statusBadge)
 
         loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
@@ -141,9 +182,9 @@ final class BrowserViewController: UIViewController {
         NSLayoutConstraint.activate([
             statusBadge.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -14),
             statusBadge.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            statusBadge.heightAnchor.constraint(equalToConstant: 38),
+            statusBadge.heightAnchor.constraint(equalToConstant: 44),
 
-            loadingIndicator.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            loadingIndicator.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
             loadingIndicator.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -28)
         ])
     }
@@ -155,6 +196,7 @@ final class BrowserViewController: UIViewController {
 
     private func setupGestures() {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
         view.addGestureRecognizer(pan)
 
         let playPauseTap = UITapGestureRecognizer(target: self, action: #selector(modeTapped))
@@ -184,6 +226,19 @@ final class BrowserViewController: UIViewController {
                 load(url: searchURL)
             }
         }
+    }
+
+    private func applyPageZoom() {
+        let zoom = BrowserStore.shared.pageZoom
+        let js = """
+        (function() {
+            if (document.documentElement) {
+                document.documentElement.style.zoom = '\(zoom)';
+                document.documentElement.style.webkitTextSizeAdjust = '\(Int(zoom * 100))%';
+            }
+        })();
+        """
+        webEngine.evaluateJavaScript(js, completion: nil)
     }
 
     private func setToolbarVisible(_ visible: Bool) {
@@ -220,9 +275,10 @@ final class BrowserViewController: UIViewController {
         let adState = AdBlocker.shared.isEnabled ? "ON" : "OFF"
         adBlockButton.setTitle("AdBlock: \(adState)", for: .normal)
 
+        let zoomPct = Int(round(BrowserStore.shared.pageZoom * 100))
         let modeName = cursorView.mode == .pointer ? "Cursor" : "Scroll"
         modeButton.setTitle("Modo: \(modeName)", for: .normal)
-        statusBadge.text = "  \(modeName) · Play/Pausa: Cambiar · Menú: Atrás/Barra  "
+        statusBadge.text = "  \(modeName) · Zoom \(zoomPct)% · Play/Pausa: Modo · Menú: Atrás/Barra  "
 
         if let urlStr = webEngine.currentURL?.absoluteString {
             urlButton.setTitle(urlStr, for: .normal)
@@ -246,14 +302,49 @@ final class BrowserViewController: UIViewController {
         setToolbarVisible(false)
     }
 
+    @objc private func zoomOutTapped() {
+        BrowserStore.shared.pageZoom -= 0.15
+        applyPageZoom()
+        updateToolbarState()
+    }
+
+    @objc private func zoomInTapped() {
+        BrowserStore.shared.pageZoom += 0.15
+        applyPageZoom()
+        updateToolbarState()
+    }
+
     @objc private func urlTapped() {
         let alert = UIAlertController(
-            title: "Ir a dirección o buscar",
-            message: "Escribe una URL o término de búsqueda",
+            title: "Buscar en Google o ir a URL",
+            message: "Escribe lo que quieras buscar o una dirección web",
             preferredStyle: .alert
         )
         alert.addTextField { tf in
-            tf.text = self.webEngine.currentURL?.absoluteString ?? "https://"
+            tf.placeholder = "ej: youtube.com o noticias hoy"
+            tf.text = ""
+            tf.keyboardType = .URL
+            tf.clearButtonMode = .whileEditing
+        }
+        alert.addAction(UIAlertAction(title: "Ir / Buscar", style: .default) { _ in
+            if let text = alert.textFields?.first?.text {
+                self.setToolbarVisible(false)
+                self.openInputURL(text)
+            }
+        })
+        if let current = webEngine.currentURL?.absoluteString {
+            alert.addAction(UIAlertAction(title: "Editar URL actual", style: .default) { _ in
+                self.openEditCurrentURL(current)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func openEditCurrentURL(_ current: String) {
+        let alert = UIAlertController(title: "Editar dirección", message: nil, preferredStyle: .alert)
+        alert.addTextField { tf in
+            tf.text = current
             tf.keyboardType = .URL
             tf.clearButtonMode = .whileEditing
         }
@@ -292,6 +383,11 @@ final class BrowserViewController: UIViewController {
         present(UINavigationController(rootViewController: vc), animated: true)
     }
 
+    @objc private func exportTapped() {
+        let vc = ExportViewController()
+        present(vc, animated: true)
+    }
+
     @objc private func adBlockTapped() {
         AdBlocker.shared.isEnabled.toggle()
         updateToolbarState()
@@ -322,9 +418,9 @@ final class BrowserViewController: UIViewController {
             lastPanPoint = point
 
             if cursorView.mode == .pointer {
-                moveCursor(by: CGPoint(x: dx * 1.35, y: dy * 1.35))
+                moveCursor(by: CGPoint(x: dx * 1.45, y: dy * 1.45))
             } else {
-                scrollWebView(by: CGPoint(x: -dx * 1.5, y: -dy * 1.5))
+                scrollWebView(by: CGPoint(x: -dx * 1.6, y: -dy * 1.6))
             }
         default:
             lastPanPoint = .zero
@@ -366,7 +462,6 @@ final class BrowserViewController: UIViewController {
         let nextY = max(8, min(bounds.height - 8, cursorView.center.y + delta.y))
         cursorView.center = CGPoint(x: nextX, y: nextY)
 
-        // Edge scrolling when cursor reaches top or bottom
         if nextY <= 12 && delta.y < 0 {
             scrollWebView(by: CGPoint(x: 0, y: delta.y * 2.2))
         } else if nextY >= bounds.height - 12 && delta.y > 0 {
@@ -375,7 +470,7 @@ final class BrowserViewController: UIViewController {
     }
 
     private func scrollWebView(by delta: CGPoint) {
-        if let scrollView = webEngine.scrollView {
+        if let scrollView = webEngine.scrollView, scrollView.contentSize.height > scrollView.bounds.height {
             let maxX = max(0, scrollView.contentSize.width - scrollView.bounds.width)
             let maxY = max(0, scrollView.contentSize.height - scrollView.bounds.height)
             let targetX = max(0, min(maxX, scrollView.contentOffset.x + delta.x))
@@ -390,35 +485,62 @@ final class BrowserViewController: UIViewController {
     private func performClickAtCursor() {
         cursorView.animateClick()
         let pt = cursorView.center
+        let viewW = max(1, view.bounds.width)
+        let viewH = max(1, view.bounds.height)
+
         let js = """
         (function() {
-            var el = document.elementFromPoint(\(pt.x), \(pt.y));
+            var vw = window.innerWidth || document.documentElement.clientWidth || \(viewW);
+            var vh = window.innerHeight || document.documentElement.clientHeight || \(viewH);
+            var x = \(pt.x) * (vw / \(viewW));
+            var y = \(pt.y) * (vh / \(viewH));
+            var el = document.elementFromPoint(x, y);
+            if (!el) {
+                var z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+                if (z !== 1) {
+                    x = x / z;
+                    y = y / z;
+                    el = document.elementFromPoint(x, y);
+                }
+            }
             if (!el) return null;
-            var tag = (el.tagName || '').toLowerCase();
-            if (tag === 'input' || tag === 'textarea' || el.isContentEditable) {
-                var type = (el.getAttribute('type') || 'text').toLowerCase();
-                if (type !== 'submit' && type !== 'button' && type !== 'checkbox' && type !== 'radio') {
-                    window.__tvBrowserActiveInput = el;
+
+            var inputEl = el.closest ? el.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="searchbox"]') : null;
+            if (!inputEl && el.querySelector) {
+                var childInput = el.querySelector('input:not([type="hidden"]), textarea');
+                if (childInput) inputEl = childInput;
+            }
+            if (inputEl) {
+                var tag = (inputEl.tagName || '').toLowerCase();
+                var type = (inputEl.getAttribute('type') || 'text').toLowerCase();
+                if (type !== 'submit' && type !== 'button' && type !== 'checkbox' && type !== 'radio' && type !== 'reset') {
+                    window.__tvBrowserActiveInput = inputEl;
+                    inputEl.focus && inputEl.focus();
                     return JSON.stringify({
                         kind: 'input',
-                        value: el.value || el.innerText || '',
-                        placeholder: el.placeholder || el.name || 'Texto',
+                        value: inputEl.value || inputEl.innerText || '',
+                        placeholder: inputEl.placeholder || inputEl.getAttribute('aria-label') || inputEl.name || 'Escribir texto',
                         isPassword: type === 'password'
                     });
                 }
             }
-            el.focus && el.focus();
+
+            var target = (el.closest && el.closest('a[href], button, [role="button"], [role="link"]')) || el;
+            target.focus && target.focus();
             ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(function(evt) {
-                el.dispatchEvent(new MouseEvent(evt, {
+                target.dispatchEvent(new MouseEvent(evt, {
                     bubbles: true,
                     cancelable: true,
                     view: window,
-                    clientX: \(pt.x),
-                    clientY: \(pt.y)
+                    clientX: x,
+                    clientY: y
                 }));
             });
-            if (typeof el.click === 'function') { el.click(); }
-            return JSON.stringify({ kind: 'clicked' });
+            if (typeof target.click === 'function') { target.click(); }
+
+            var link = el.closest ? el.closest('a[href]') : null;
+            var href = (link && link.href && link.href.indexOf('javascript:') !== 0) ? link.href : null;
+            return JSON.stringify({ kind: 'clicked', href: href });
         })();
         """
 
@@ -426,17 +548,26 @@ final class BrowserViewController: UIViewController {
             guard let self = self,
                   let jsonStr = result as? String,
                   let data = jsonStr.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  obj["kind"] as? String == "input" else {
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return
             }
 
-            let currentVal = obj["value"] as? String ?? ""
-            let placeholder = obj["placeholder"] as? String ?? "Texto"
-            let isPassword = obj["isPassword"] as? Bool ?? false
+            let kind = obj["kind"] as? String
+            if kind == "input" {
+                let currentVal = obj["value"] as? String ?? ""
+                let placeholder = obj["placeholder"] as? String ?? "Escribir texto"
+                let isPassword = obj["isPassword"] as? Bool ?? false
 
-            DispatchQueue.main.async {
-                self.promptWebTextInput(title: placeholder, currentValue: currentVal, isPassword: isPassword)
+                DispatchQueue.main.async {
+                    self.promptWebTextInput(title: placeholder, currentValue: currentVal, isPassword: isPassword)
+                }
+            } else if kind == "clicked", let href = obj["href"] as? String, let url = URL(string: href) {
+                // Fallback if the click didn't trigger navigation (e.g. target=_blank or intercepted link)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    if !self.isLoadingPage && self.webEngine.currentURL?.absoluteString != href {
+                        self.load(url: url)
+                    }
+                }
             }
         }
     }
@@ -448,15 +579,55 @@ final class BrowserViewController: UIViewController {
             tf.isSecureTextEntry = isPassword
             tf.clearButtonMode = .whileEditing
         }
+
         alert.addAction(UIAlertAction(title: "Aceptar", style: .default) { _ in
             let text = alert.textFields?.first?.text ?? ""
-            self.applyWebTextInput(text, submit: false)
+            self.handleEnteredText(text, isPassword: isPassword, submit: false)
         })
         alert.addAction(UIAlertAction(title: "Aceptar y Enviar", style: .default) { _ in
             let text = alert.textFields?.first?.text ?? ""
-            self.applyWebTextInput(text, submit: true)
+            self.handleEnteredText(text, isPassword: isPassword, submit: true)
         })
+
+        if let host = webEngine.currentURL?.host {
+            let saved = BrowserStore.shared.credentials(forHost: host)
+            if let cred = saved.first {
+                let label = isPassword ? "Autocompletar contraseña (\(cred.username))" : "Autocompletar (\(cred.username))"
+                alert.addAction(UIAlertAction(title: label, style: .default) { _ in
+                    let value = isPassword ? cred.password : cred.username
+                    self.applyWebTextInput(value, submit: isPassword)
+                })
+            }
+        }
+
         alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func handleEnteredText(_ text: String, isPassword: Bool, submit: Bool) {
+        if !isPassword && !text.isEmpty {
+            lastUsernameEntered = text
+        }
+        applyWebTextInput(text, submit: submit)
+
+        if isPassword, !text.isEmpty, let host = webEngine.currentURL?.host {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.offerToSavePassword(host: host, username: self.lastUsernameEntered, password: text)
+            }
+        }
+    }
+
+    private func offerToSavePassword(host: String, username: String, password: String) {
+        let userDisplay = username.isEmpty ? "esta cuenta" : username
+        let alert = UIAlertController(
+            title: "¿Guardar contraseña?",
+            message: "Guardar credenciales para \(host) (\(userDisplay)) en el llavero de Apple TV.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Guardar", style: .default) { _ in
+            BrowserStore.shared.saveCredential(host: host, username: username, password: password)
+        })
+        alert.addAction(UIAlertAction(title: "Ahora no", style: .cancel))
         present(alert, animated: true)
     }
 
@@ -470,9 +641,9 @@ final class BrowserViewController: UIViewController {
         if (el.form) {
             el.form.submit();
         } else {
-            el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+            ['keydown', 'keypress', 'keyup'].forEach(function(k) {
+                el.dispatchEvent(new KeyboardEvent(k, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+            });
         }
         """ : ""
 
@@ -480,6 +651,7 @@ final class BrowserViewController: UIViewController {
         (function() {
             var el = window.__tvBrowserActiveInput;
             if (!el) return;
+            el.focus && el.focus();
             if (el.isContentEditable) {
                 el.innerText = "\(escaped)";
             } else {
@@ -551,11 +723,14 @@ extension BrowserViewController: InputControllerDelegate {
 
 extension BrowserViewController: TVWebEngineDelegate {
     func webEngineDidStartLoading(_ engine: TVWebEngine) {
+        isLoadingPage = true
         loadingIndicator.startAnimating()
     }
 
     func webEngineDidFinishLoading(_ engine: TVWebEngine) {
+        isLoadingPage = false
         loadingIndicator.stopAnimating()
+        applyPageZoom()
         let adScript = AdBlocker.shared.cosmeticAndPopupScript
         if !adScript.isEmpty {
             engine.evaluateJavaScript(adScript, completion: nil)
@@ -564,6 +739,7 @@ extension BrowserViewController: TVWebEngineDelegate {
     }
 
     func webEngine(_ engine: TVWebEngine, didFailWithError error: Error) {
+        isLoadingPage = false
         loadingIndicator.stopAnimating()
         updateToolbarState()
     }

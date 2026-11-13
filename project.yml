@@ -23,5 +23,8 @@ targets:
         CODE_SIGN_STYLE: Automatic
     dependencies:
       - sdk: GameController.framework
+      - sdk: Network.framework
+      - sdk: Security.framework
+      - sdk: CoreImage.framework
       - sdk: UIKit.framework
       - sdk: Foundation.framework
