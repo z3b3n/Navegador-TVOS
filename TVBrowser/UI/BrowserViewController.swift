@@ -568,14 +568,14 @@ extension BrowserViewController: TVWebEngineDelegate {
         updateToolbarState()
     }
 
-    func webEngine(_ engine: TVWebEngine, didUpdateURL url: URL?, title: String?) {
+    func webEngine(_ engine: TVWebEngine, didUpdate url: URL?, title: String?) {
         if let url = url {
             BrowserStore.shared.recordHistory(title: title ?? url.host ?? url.absoluteString, urlString: url.absoluteString)
         }
         updateToolbarState()
     }
 
-    func webEngine(_ engine: TVWebEngine, shouldAllowURL url: URL) -> Bool {
+    func webEngine(_ engine: TVWebEngine, shouldAllow url: URL) -> Bool {
         AdBlocker.shared.shouldAllow(url: url)
     }
 }
