@@ -24,6 +24,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, nullable) NSURL *currentURL;
 @property (nonatomic, readonly, nullable) NSString *currentTitle;
 @property (nonatomic, readonly) BOOL isUsingWKWebView;
+/// Incremented every time a main-frame navigation is allowed to start.
+@property (nonatomic, readonly) NSUInteger mainFrameNavigationCount;
+
+/// Applies native page zoom (WKWebView.pageZoom). Returns NO if unsupported.
+- (BOOL)applyNativePageZoom:(CGFloat)zoom;
 
 - (instancetype)initWithFrame:(CGRect)frame;
 - (void)loadURL:(NSURL *)url;

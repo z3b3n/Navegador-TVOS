@@ -212,17 +212,22 @@ final class BrowserViewController: UIViewController {
     }
 
     private func openInputURL(_ raw: String) {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Dictation often adds a trailing period ("youtube.com.")
+        while trimmed.hasSuffix(".") { trimmed.removeLast() }
         guard !trimmed.isEmpty else { return }
 
-        if let direct = URL(string: trimmed), direct.scheme != nil {
+        if let direct = URL(string: trimmed),
+           let scheme = direct.scheme?.lowercased(),
+           ["http", "https", "file", "about", "data"].contains(scheme) {
             load(url: direct)
         } else if trimmed.contains("."), !trimmed.contains(" "),
                   let httpsURL = URL(string: "https://" + trimmed) {
             load(url: httpsURL)
         } else {
-            let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
-            if let searchURL = URL(string: "https://www.google.com/search?q=" + encoded) {
+            var comps = URLComponents(string: "https://www.google.com/search")!
+            comps.queryItems = [URLQueryItem(name: "q", value: trimmed)]
+            if let searchURL = comps.url {
                 load(url: searchURL)
             }
         }
@@ -230,6 +235,8 @@ final class BrowserViewController: UIViewController {
 
     private func applyPageZoom() {
         let zoom = BrowserStore.shared.pageZoom
+        // Native zoom keeps click coordinates and page layout consistent.
+        if webEngine.applyNativePageZoom(CGFloat(zoom)) { return }
         let js = """
         (function() {
             if (document.documentElement) {
@@ -278,7 +285,8 @@ final class BrowserViewController: UIViewController {
         let zoomPct = Int(round(BrowserStore.shared.pageZoom * 100))
         let modeName = cursorView.mode == .pointer ? "Cursor" : "Scroll"
         modeButton.setTitle("Modo: \(modeName)", for: .normal)
-        statusBadge.text = "  \(modeName) · Zoom \(zoomPct)% · Play/Pausa: Modo · Menú: Atrás/Barra  "
+        let engineName = webEngine.isUsingWKWebView ? "WebKit" : "UIWebView"
+        statusBadge.text = "  \(engineName) · \(modeName) · Zoom \(zoomPct)% · Play/Pausa: Modo · Menú: Atrás/Barra  "
 
         if let urlStr = webEngine.currentURL?.absoluteString {
             urlButton.setTitle(urlStr, for: .normal)
@@ -323,15 +331,23 @@ final class BrowserViewController: UIViewController {
         alert.addTextField { tf in
             tf.placeholder = "ej: youtube.com o noticias hoy"
             tf.text = ""
-            tf.keyboardType = .URL
+            tf.keyboardType = .webSearch
+            tf.returnKeyType = .go
+            tf.autocapitalizationType = .none
+            tf.autocorrectionType = .no
             tf.clearButtonMode = .whileEditing
-        }
-        alert.addAction(UIAlertAction(title: "Ir / Buscar", style: .default) { _ in
-            if let text = alert.textFields?.first?.text {
-                self.setToolbarVisible(false)
-                self.openInputURL(text)
+            self.attachSubmitOnReturn(tf, alert: alert) { [weak self] text in
+                self?.setToolbarVisible(false)
+                self?.openInputURL(text)
             }
-        })
+        }
+        let goAction = UIAlertAction(title: "Ir / Buscar", style: .default) { [weak self, weak alert] _ in
+            guard let self = self, let text = alert?.textFields?.first?.text else { return }
+            self.setToolbarVisible(false)
+            self.openInputURL(text)
+        }
+        alert.addAction(goAction)
+        alert.preferredAction = goAction
         if let current = webEngine.currentURL?.absoluteString {
             alert.addAction(UIAlertAction(title: "Editar URL actual", style: .default) { _ in
                 self.openEditCurrentURL(current)
@@ -346,16 +362,40 @@ final class BrowserViewController: UIViewController {
         alert.addTextField { tf in
             tf.text = current
             tf.keyboardType = .URL
+            tf.returnKeyType = .go
+            tf.autocapitalizationType = .none
+            tf.autocorrectionType = .no
             tf.clearButtonMode = .whileEditing
-        }
-        alert.addAction(UIAlertAction(title: "Ir", style: .default) { _ in
-            if let text = alert.textFields?.first?.text {
-                self.setToolbarVisible(false)
-                self.openInputURL(text)
+            self.attachSubmitOnReturn(tf, alert: alert) { [weak self] text in
+                self?.setToolbarVisible(false)
+                self?.openInputURL(text)
             }
-        })
+        }
+        let goAction = UIAlertAction(title: "Ir", style: .default) { [weak self, weak alert] _ in
+            guard let self = self, let text = alert?.textFields?.first?.text else { return }
+            self.setToolbarVisible(false)
+            self.openInputURL(text)
+        }
+        alert.addAction(goAction)
+        alert.preferredAction = goAction
         alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
         present(alert, animated: true)
+    }
+
+    /// When the user presses the keyboard's return key ("Ir"), submit immediately
+    /// instead of forcing them to find the button in the alert afterwards.
+    private func attachSubmitOnReturn(_ tf: UITextField, alert: UIAlertController, handler: @escaping (String) -> Void) {
+        tf.addAction(UIAction { [weak alert, weak tf] _ in
+            let text = tf?.text ?? ""
+            guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            DispatchQueue.main.async {
+                if let alert = alert, alert.presentingViewController != nil {
+                    alert.dismiss(animated: true) { handler(text) }
+                } else {
+                    handler(text)
+                }
+            }
+        }, for: .editingDidEndOnExit)
     }
 
     @objc private func addBookmarkTapped() {
@@ -487,6 +527,8 @@ final class BrowserViewController: UIViewController {
         let pt = cursorView.center
         let viewW = max(1, view.bounds.width)
         let viewH = max(1, view.bounds.height)
+        let navCountBefore = webEngine.mainFrameNavigationCount
+        let urlBefore = webEngine.currentURL
 
         let js = """
         (function() {
@@ -504,43 +546,80 @@ final class BrowserViewController: UIViewController {
                 }
             }
             if (!el) return null;
+            window.__tvBrowserLastClick = Date.now();
 
-            var inputEl = el.closest ? el.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="searchbox"]') : null;
-            if (!inputEl && el.querySelector) {
-                var childInput = el.querySelector('input:not([type="hidden"]), textarea');
-                if (childInput) inputEl = childInput;
+            var nonText = ['submit','button','checkbox','radio','reset','file','image','range','color','hidden'];
+            function isTextInput(n) {
+                if (!n || !n.tagName) return false;
+                var tag = n.tagName.toLowerCase();
+                if (tag === 'textarea') return !n.disabled && !n.readOnly;
+                if (tag === 'input') {
+                    var t = (n.getAttribute('type') || 'text').toLowerCase();
+                    return nonText.indexOf(t) === -1 && !n.disabled && !n.readOnly;
+                }
+                if (n.isContentEditable) return true;
+                var role = (n.getAttribute && n.getAttribute('role')) || '';
+                return role === 'textbox' || role === 'searchbox' || role === 'combobox' && tag === 'input';
             }
-            if (inputEl) {
-                var tag = (inputEl.tagName || '').toLowerCase();
-                var type = (inputEl.getAttribute('type') || 'text').toLowerCase();
-                if (type !== 'submit' && type !== 'button' && type !== 'checkbox' && type !== 'radio' && type !== 'reset') {
-                    window.__tvBrowserActiveInput = inputEl;
-                    inputEl.focus && inputEl.focus();
-                    return JSON.stringify({
-                        kind: 'input',
-                        value: inputEl.value || inputEl.innerText || '',
-                        placeholder: inputEl.placeholder || inputEl.getAttribute('aria-label') || inputEl.name || 'Escribir texto',
-                        isPassword: type === 'password'
-                    });
+
+            var inputEl = null;
+            if (isTextInput(el)) inputEl = el;
+            if (!inputEl && el.closest) {
+                var c = el.closest('input, textarea, [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="searchbox"]');
+                if (isTextInput(c)) inputEl = c;
+            }
+            if (!inputEl && el.tagName && el.tagName.toLowerCase() === 'label' && el.control && isTextInput(el.control)) {
+                inputEl = el.control;
+            }
+            if (!inputEl && el.querySelector) {
+                // Only look inside small wrappers (e.g. a styled search box), never a whole page container.
+                var r = el.getBoundingClientRect();
+                if (r.width < 900 && r.height < 160) {
+                    var inner = el.querySelector('input:not([type="hidden"]), textarea, [contenteditable="true"]');
+                    if (isTextInput(inner)) inputEl = inner;
                 }
             }
+            if (inputEl) {
+                var itype = (inputEl.getAttribute('type') || 'text').toLowerCase();
+                window.__tvBrowserActiveInput = inputEl;
+                try { inputEl.focus(); } catch (e) {}
+                return JSON.stringify({
+                    kind: 'input',
+                    value: inputEl.isContentEditable ? (inputEl.innerText || '') : (inputEl.value || ''),
+                    placeholder: inputEl.placeholder || inputEl.getAttribute('aria-label') || inputEl.getAttribute('title') || inputEl.name || 'Escribir texto',
+                    isPassword: itype === 'password'
+                });
+            }
 
-            var target = (el.closest && el.closest('a[href], button, [role="button"], [role="link"]')) || el;
-            target.focus && target.focus();
-            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(function(evt) {
-                target.dispatchEvent(new MouseEvent(evt, {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window,
-                    clientX: x,
-                    clientY: y
-                }));
-            });
-            if (typeof target.click === 'function') { target.click(); }
+            var target = (el.closest && el.closest('a[href], button, input, select, label, summary, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [onclick]')) || el;
+            var opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons: 1 };
+            try {
+                if (typeof PointerEvent === 'function') {
+                    var popts = Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, opts);
+                    target.dispatchEvent(new PointerEvent('pointerover', popts));
+                    target.dispatchEvent(new PointerEvent('pointerdown', popts));
+                }
+            } catch (e) {}
+            target.dispatchEvent(new MouseEvent('mouseover', opts));
+            target.dispatchEvent(new MouseEvent('mousedown', opts));
+            try { target.focus && target.focus(); } catch (e) {}
+            try {
+                if (typeof PointerEvent === 'function') {
+                    target.dispatchEvent(new PointerEvent('pointerup', Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, opts, { buttons: 0 })));
+                }
+            } catch (e) {}
+            target.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, opts, { buttons: 0 })));
+            // A single click event (dispatching it AND calling .click() fired it twice,
+            // which toggled menus open+closed and cancelled link navigations).
+            var notPrevented = target.dispatchEvent(new MouseEvent('click', Object.assign({}, opts, { buttons: 0, detail: 1 })));
 
             var link = el.closest ? el.closest('a[href]') : null;
-            var href = (link && link.href && link.href.indexOf('javascript:') !== 0) ? link.href : null;
-            return JSON.stringify({ kind: 'clicked', href: href });
+            var href = null;
+            if (link && link.href) {
+                var raw = (link.getAttribute('href') || '').trim();
+                if (raw.indexOf('javascript:') !== 0 && raw.charAt(0) !== '#') href = link.href;
+            }
+            return JSON.stringify({ kind: 'clicked', href: href, prevented: !notPrevented });
         })();
         """
 
@@ -561,10 +640,16 @@ final class BrowserViewController: UIViewController {
                 DispatchQueue.main.async {
                     self.promptWebTextInput(title: placeholder, currentValue: currentVal, isPassword: isPassword)
                 }
-            } else if kind == "clicked", let href = obj["href"] as? String, let url = URL(string: href) {
-                // Fallback if the click didn't trigger navigation (e.g. target=_blank or intercepted link)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    if !self.isLoadingPage && self.webEngine.currentURL?.absoluteString != href {
+            } else if kind == "clicked",
+                      let href = obj["href"] as? String,
+                      let url = URL(string: href),
+                      (obj["prevented"] as? Bool) != true {
+                // Fallback: the page didn't handle the click itself, but no navigation started
+                // (target=_blank on UIWebView, overlays swallowing the click, etc.).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    let navigated = self.webEngine.mainFrameNavigationCount != navCountBefore
+                    let urlChanged = self.webEngine.currentURL != urlBefore
+                    if !navigated && !urlChanged {
                         self.load(url: url)
                     }
                 }
@@ -577,17 +662,26 @@ final class BrowserViewController: UIViewController {
         alert.addTextField { tf in
             tf.text = currentValue
             tf.isSecureTextEntry = isPassword
+            tf.autocapitalizationType = .none
+            tf.autocorrectionType = .no
+            tf.returnKeyType = isPassword ? .done : .search
             tf.clearButtonMode = .whileEditing
+            // Return key on the tvOS keyboard = write the text and submit it.
+            self.attachSubmitOnReturn(tf, alert: alert) { [weak self] text in
+                self?.handleEnteredText(text, isPassword: isPassword, submit: true)
+            }
         }
 
-        alert.addAction(UIAlertAction(title: "Aceptar", style: .default) { _ in
-            let text = alert.textFields?.first?.text ?? ""
-            self.handleEnteredText(text, isPassword: isPassword, submit: false)
+        let submitAction = UIAlertAction(title: "Escribir y Enviar", style: .default) { [weak self, weak alert] _ in
+            let text = alert?.textFields?.first?.text ?? ""
+            self?.handleEnteredText(text, isPassword: isPassword, submit: true)
+        }
+        alert.addAction(submitAction)
+        alert.addAction(UIAlertAction(title: "Solo escribir", style: .default) { [weak self, weak alert] _ in
+            let text = alert?.textFields?.first?.text ?? ""
+            self?.handleEnteredText(text, isPassword: isPassword, submit: false)
         })
-        alert.addAction(UIAlertAction(title: "Aceptar y Enviar", style: .default) { _ in
-            let text = alert.textFields?.first?.text ?? ""
-            self.handleEnteredText(text, isPassword: isPassword, submit: true)
-        })
+        alert.preferredAction = submitAction
 
         if let host = webEngine.currentURL?.host {
             let saved = BrowserStore.shared.credentials(forHost: host)
@@ -632,40 +726,64 @@ final class BrowserViewController: UIViewController {
     }
 
     private func applyWebTextInput(_ text: String, submit: Bool) {
-        let escaped = text
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-
-        let submitJS = submit ? """
-        if (el.form) {
-            el.form.submit();
-        } else {
-            ['keydown', 'keypress', 'keyup'].forEach(function(k) {
-                el.dispatchEvent(new KeyboardEvent(k, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-            });
-        }
-        """ : ""
+        // JSON-encode so any character (quotes, newlines, emoji, U+2028...) is safe in JS.
+        let jsonData = (try? JSONSerialization.data(withJSONObject: [text])) ?? Data("[\"\"]".utf8)
+        let jsonArray = String(data: jsonData, encoding: .utf8) ?? "[\"\"]"
 
         let js = """
         (function() {
+            var value = \(jsonArray)[0];
             var el = window.__tvBrowserActiveInput;
-            if (!el) return;
-            el.focus && el.focus();
+            if (!el || !el.isConnected) {
+                el = document.activeElement;
+                if (!el || el === document.body) return 'no-input';
+            }
+            try { el.focus(); } catch (e) {}
+
             if (el.isContentEditable) {
-                el.innerText = "\(escaped)";
+                el.innerText = value;
             } else {
-                var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-                          || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                if (setter) {
-                    setter.call(el, "\(escaped)");
-                } else {
-                    el.value = "\(escaped)";
+                // Use the setter of the element's own prototype. Using the
+                // HTMLInputElement setter on a <textarea> (e.g. Google's search box)
+                // throws and nothing gets written.
+                var proto = (el instanceof HTMLTextAreaElement) ? HTMLTextAreaElement.prototype
+                          : (el instanceof HTMLInputElement) ? HTMLInputElement.prototype : null;
+                var desc = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+                try {
+                    if (desc && desc.set) { desc.set.call(el, value); } else { el.value = value; }
+                } catch (e) {
+                    el.value = value;
                 }
             }
-            el.dispatchEvent(new Event('input', { bubbles: true }));
+
+            var ev;
+            try { ev = new InputEvent('input', { bubbles: true, cancelable: false, inputType: 'insertText', data: value }); }
+            catch (e) { ev = new Event('input', { bubbles: true }); }
+            el.dispatchEvent(ev);
             el.dispatchEvent(new Event('change', { bubbles: true }));
-            \(submitJS)
+
+            if (\(submit ? "true" : "false")) {
+                setTimeout(function() {
+                    var handled = false;
+                    ['keydown', 'keypress', 'keyup'].forEach(function(k) {
+                        var kev = new KeyboardEvent(k, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, charCode: k === 'keypress' ? 13 : 0, bubbles: true, cancelable: true });
+                        try {
+                            Object.defineProperty(kev, 'keyCode', { get: function() { return 13; } });
+                            Object.defineProperty(kev, 'which', { get: function() { return 13; } });
+                        } catch (e) {}
+                        if (!el.dispatchEvent(kev)) handled = true;
+                    });
+                    if (handled) return;  // the page handled Enter itself (SPA search boxes)
+                    var form = el.form || (el.closest ? el.closest('form') : null);
+                    if (!form) return;
+                    if (typeof form.requestSubmit === 'function') {
+                        try { form.requestSubmit(); return; } catch (e) {}
+                    }
+                    var btn = form.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
+                    if (btn) { btn.click(); } else { form.submit(); }
+                }, 60);
+            }
+            return 'ok';
         })();
         """
         webEngine.evaluateJavaScript(js, completion: nil)
@@ -738,12 +856,14 @@ extension BrowserViewController: TVWebEngineDelegate {
         updateToolbarState()
     }
 
+    @objc(webEngine:didFailWithError:)
     func webEngine(_ engine: TVWebEngine, didFailWithError error: Error) {
         isLoadingPage = false
         loadingIndicator.stopAnimating()
         updateToolbarState()
     }
 
+    @objc(webEngine:didUpdateURL:title:)
     func webEngine(_ engine: TVWebEngine, didUpdate url: URL?, title: String?) {
         if let url = url {
             BrowserStore.shared.recordHistory(title: title ?? url.host ?? url.absoluteString, urlString: url.absoluteString)
@@ -751,6 +871,7 @@ extension BrowserViewController: TVWebEngineDelegate {
         updateToolbarState()
     }
 
+    @objc(webEngine:shouldAllowURL:)
     func webEngine(_ engine: TVWebEngine, shouldAllow url: URL) -> Bool {
         AdBlocker.shared.shouldAllow(url: url)
     }

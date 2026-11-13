@@ -86,10 +86,13 @@ final class AdBlocker {
             var isAuthHost = host.indexOf('accounts.google.') !== -1 || host.indexOf('myaccount.google.') !== -1;
 
             if (!isAuthHost) {
-                var origOpen = window.open;
+                // Block unsolicited pop-ups, but allow window.open() right after a user
+                // click (many sites open links/results that way). It opens in the same view.
                 window.open = function(url) {
-                    if (url && typeof url === 'string' && url.indexOf('accounts.google.com') !== -1) {
-                        window.location.href = url;
+                    if (!url || typeof url !== 'string') return null;
+                    var recentClick = window.__tvBrowserLastClick && (Date.now() - window.__tvBrowserLastClick) < 1500;
+                    if (recentClick || url.indexOf('accounts.google.com') !== -1) {
+                        try { window.location.href = new URL(url, window.location.href).href; } catch (e) { window.location.href = url; }
                         return window;
                     }
                     return null;

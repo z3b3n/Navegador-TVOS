@@ -5,7 +5,16 @@
 @interface TVWebEngine ()
 @property (nonatomic, strong, readwrite) UIView *webView;
 @property (nonatomic, assign, readwrite) BOOL isUsingWKWebView;
+@property (nonatomic, assign, readwrite) NSUInteger mainFrameNavigationCount;
 @end
+
+static BOOL TVIsIgnorableError(NSError *error) {
+    // NSURLErrorCancelled (-999): a new navigation replaced the previous one.
+    // WebKitErrorFrameLoadInterruptedByPolicyChange (102): blocked/handled by policy.
+    if ([error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled) return YES;
+    if ([error.domain isEqualToString:@"WebKitErrorDomain"] && error.code == 102) return YES;
+    return NO;
+}
 
 @implementation TVWebEngine
 
@@ -157,6 +166,14 @@
     }
 }
 
+- (BOOL)applyNativePageZoom:(CGFloat)zoom {
+    if (_isUsingWKWebView && [_webView respondsToSelector:@selector(setPageZoom:)]) {
+        ((void (*)(id, SEL, CGFloat))objc_msgSend)(_webView, @selector(setPageZoom:), zoom);
+        return YES;
+    }
+    return NO;
+}
+
 - (void)loadHTMLString:(NSString *)html baseURL:(NSURL *)baseURL {
     if ([_webView respondsToSelector:@selector(loadHTMLString:baseURL:)]) {
         ((void (*)(id, SEL, id, id))objc_msgSend)(_webView, @selector(loadHTMLString:baseURL:), html, baseURL);
@@ -215,6 +232,21 @@
         allow = [self.delegate webEngine:self shouldAllowURL:url];
     }
 
+    if (allow) {
+        BOOL isMain = YES;
+        @try {
+            id frame = [navigationAction valueForKey:@"targetFrame"];
+            if (frame) {
+                isMain = [[frame valueForKey:@"mainFrame"] boolValue];
+            }
+        } @catch (NSException *exception) {
+            isMain = YES;
+        }
+        if (isMain) {
+            self.mainFrameNavigationCount += 1;
+        }
+    }
+
     if (decisionHandler) {
         decisionHandler(allow ? 1 : 0);
     }
@@ -236,12 +268,14 @@
 }
 
 - (void)webView:(id)webView didFailNavigation:(id)navigation withError:(NSError *)error {
+    if (TVIsIgnorableError(error)) return;
     if ([self.delegate respondsToSelector:@selector(webEngine:didFailWithError:)]) {
         [self.delegate webEngine:self didFailWithError:error];
     }
 }
 
 - (void)webView:(id)webView didFailProvisionalNavigation:(id)navigation withError:(NSError *)error {
+    if (TVIsIgnorableError(error)) return;
     if ([self.delegate respondsToSelector:@selector(webEngine:didFailWithError:)]) {
         [self.delegate webEngine:self didFailWithError:error];
     }
@@ -271,10 +305,14 @@
 #pragma mark - UIWebViewDelegate (Fallback)
 
 - (BOOL)webView:(id)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(NSInteger)navigationType {
+    BOOL allow = YES;
     if (request.URL && [self.delegate respondsToSelector:@selector(webEngine:shouldAllowURL:)]) {
-        return [self.delegate webEngine:self shouldAllowURL:request.URL];
+        allow = [self.delegate webEngine:self shouldAllowURL:request.URL];
     }
-    return YES;
+    if (allow && (request.mainDocumentURL == nil || [request.mainDocumentURL isEqual:request.URL])) {
+        self.mainFrameNavigationCount += 1;
+    }
+    return allow;
 }
 
 - (void)webViewDidStartLoad:(id)webView {
@@ -293,6 +331,7 @@
 }
 
 - (void)webView:(id)webView didFailLoadWithError:(NSError *)error {
+    if (TVIsIgnorableError(error)) return;
     if ([self.delegate respondsToSelector:@selector(webEngine:didFailWithError:)]) {
         [self.delegate webEngine:self didFailWithError:error];
     }
