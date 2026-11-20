@@ -33,7 +33,7 @@ final class BrowserViewController: UIViewController {
     private let moreButton = UIButton(type: .system)
     private let hideToolbarButton = UIButton(type: .system)
 
-    private let progressBar = UIProgressView(progressViewStyle: .bar)
+    private let progressBar = UIProgressView(progressViewStyle: .default)
     private let linkPreviewLabel = UILabel()
     private let toastLabel = UILabel()
     private var toastHideWorkItem: DispatchWorkItem?
@@ -670,6 +670,7 @@ final class BrowserViewController: UIViewController {
             case .desktopMac: return "Escritorio Mac"
             case .iPad: return "iPad"
             case .iPhone: return "iPhone"
+            @unknown default: return "Escritorio Mac"
             }
         }()
         let adState = tab.adBlockEnabled ? "ON" : "OFF"
@@ -1847,7 +1848,7 @@ extension BrowserViewController: TVWebEngineDelegate {
     }
 
     @objc(webEngine:didFailWithError:failingURL:)
-    func webEngine(_ engine: TVWebEngine, didFailWithError error: Error, failingURL: URL?) {
+    func webEngine(_ engine: TVWebEngine, didFailWithError error: Error, failing failingURL: URL?) {
         guard let tab = tab(for: engine) else { return }
         tab.isLoading = false
         if tab === activeTab {

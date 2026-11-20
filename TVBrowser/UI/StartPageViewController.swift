@@ -76,8 +76,7 @@ final class StartPageViewController: UIViewController {
     }
 
     private func setupCollectionView() {
-        let layout = UICollectionViewCompositionalLayout { [weak self] sectionIndex, _ in
-            guard let self = self else { return nil }
+        let layout = UICollectionViewCompositionalLayout { sectionIndex, _ in
             let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.2), heightDimension: .absolute(150))
             let item = NSCollectionLayoutItem(layoutSize: itemSize)
             item.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10)
@@ -156,7 +155,7 @@ final class StartPageViewController: UIViewController {
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began,
-              let focusedCell = UIScreen.main.focusedView as? UICollectionViewCell,
+              let focusedCell = view.window?.windowScene?.focusSystem?.focusedItem as? UICollectionViewCell,
               let indexPath = collectionView.indexPath(for: focusedCell),
               let section = Section(rawValue: indexPath.section) else { return }
 

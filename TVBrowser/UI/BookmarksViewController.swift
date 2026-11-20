@@ -37,7 +37,7 @@ final class BookmarksViewController: UITableViewController {
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began,
-              let cell = UIScreen.main.focusedView as? UITableViewCell,
+              let cell = view.window?.windowScene?.focusSystem?.focusedItem as? UITableViewCell,
               let indexPath = tableView.indexPath(for: cell),
               BrowserStore.shared.bookmarks.indices.contains(indexPath.row) else { return }
 

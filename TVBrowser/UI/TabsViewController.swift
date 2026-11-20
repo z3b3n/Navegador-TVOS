@@ -131,7 +131,7 @@ final class TabsViewController: UIViewController {
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began,
-              let cell = UIScreen.main.focusedView as? UICollectionViewCell,
+              let cell = view.window?.windowScene?.focusSystem?.focusedItem as? UICollectionViewCell,
               let indexPath = collectionView.indexPath(for: cell),
               tabs.indices.contains(indexPath.item) else { return }
 
