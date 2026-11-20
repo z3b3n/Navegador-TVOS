@@ -19,7 +19,7 @@ final class AdBlocker {
         "ogs.google.com"
     ]
 
-    private let blockedHosts: Set<String> = [
+    private let blockedHosts: [String] = [
         "doubleclick.net",
         "googlesyndication.com",
         "googleadservices.com",
@@ -50,10 +50,22 @@ final class AdBlocker {
         "bidswitch.net",
         "casalemedia.com",
         "advertising.com",
-        "admob.com"
+        "admob.com",
+        "taboola.com",
+        "moatads.com",
+        "adsafeprotected.com",
+        "2mdn.net",
+        "yieldmo.com",
+        "sharethrough.com",
+        "smartadserver.com",
+        "adform.net",
+        "popunder.net"
     ]
 
+    private let blockedHostSet: Set<String>
+
     private init() {
+        blockedHostSet = Set(blockedHosts)
         if UserDefaults.standard.object(forKey: "tvbrowser_adblock_enabled") != nil {
             isEnabled = UserDefaults.standard.bool(forKey: "tvbrowser_adblock_enabled")
         }
@@ -66,13 +78,34 @@ final class AdBlocker {
         if allowedAuthHosts.contains(host) {
             return true
         }
-        if blockedHosts.contains(host) {
+        if blockedHostSet.contains(host) {
             return false
         }
-        for blocked in blockedHosts where host.hasSuffix("." + blocked) {
+        for blocked in blockedHostSet where host.hasSuffix("." + blocked) {
             return false
         }
         return true
+    }
+
+    /// Generates Safari-compatible WKContentRuleList JSON for network-level blocking.
+    var contentRuleListJSON: String? {
+        guard isEnabled else { return nil }
+        var rules: [[String: Any]] = []
+        for host in blockedHostSet.sorted() {
+            let escaped = NSRegularExpression.escapedPattern(for: host)
+            rules.append([
+                "trigger": [
+                    "url-filter": "^https?://([^/]+\\.)?\(escaped)(:|/|$)",
+                    "load-type": ["third-party"]
+                ],
+                "action": ["type": "block"]
+            ])
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: rules),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
     }
 
     var cosmeticAndPopupScript: String {
@@ -83,17 +116,20 @@ final class AdBlocker {
             window.__tvBrowserAdBlockApplied = true;
 
             var host = (window.location && window.location.hostname || '').toLowerCase();
-            var isAuthHost = host.indexOf('accounts.google.') !== -1 || host.indexOf('myaccount.google.') !== -1;
+            var isAuthHost = host.indexOf('accounts.google.') !== -1 ||
+                             host.indexOf('myaccount.google.') !== -1 ||
+                             host.indexOf('login.microsoftonline.') !== -1 ||
+                             host.indexOf('github.com') !== -1;
 
-            if (!isAuthHost) {
-                // Block unsolicited pop-ups, but allow window.open() right after a user
-                // click (many sites open links/results that way). It opens in the same view.
-                window.open = function(url) {
-                    if (!url || typeof url !== 'string') return null;
-                    var recentClick = window.__tvBrowserLastClick && (Date.now() - window.__tvBrowserLastClick) < 1500;
-                    if (recentClick || url.indexOf('accounts.google.com') !== -1) {
-                        try { window.location.href = new URL(url, window.location.href).href; } catch (e) { window.location.href = url; }
-                        return window;
+            if (!isAuthHost && window.open) {
+                var origOpen = window.open.bind(window);
+                window.open = function(url, target, features) {
+                    var recentClick = window.__tvBrowserLastClick && (Date.now() - window.__tvBrowserLastClick) < 1800;
+                    if (recentClick) {
+                        return origOpen(url, target, features);
+                    }
+                    if (typeof url === 'string' && url.indexOf('accounts.google.com') !== -1) {
+                        return origOpen(url, target, features);
                     }
                     return null;
                 };

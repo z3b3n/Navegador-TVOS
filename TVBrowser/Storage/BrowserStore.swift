@@ -19,28 +19,97 @@ struct SavedCredential: Codable, Equatable {
     let updatedAt: Date
 }
 
+enum SearchEngineOption: String, Codable, CaseIterable {
+    case google
+    case duckDuckGo
+    case bing
+
+    var displayName: String {
+        switch self {
+        case .google: return "Google"
+        case .duckDuckGo: return "DuckDuckGo"
+        case .bing: return "Bing"
+        }
+    }
+
+    func searchURL(for query: String) -> URL? {
+        let base: String
+        switch self {
+        case .google: base = "https://www.google.com/search"
+        case .duckDuckGo: base = "https://duckduckgo.com/"
+        case .bing: base = "https://www.bing.com/search"
+        }
+        var comps = URLComponents(string: base)
+        comps?.queryItems = [URLQueryItem(name: "q", value: query)]
+        return comps?.url
+    }
+}
+
+struct WebAppItem: Codable, Equatable {
+    let id: UUID
+    var title: String
+    var urlString: String
+    var userAgentModeRaw: Int
+    var zoom: Double
+    var adBlockEnabled: Bool
+    var autoLaunch: Bool
+    let createdAt: Date
+
+    var userAgentMode: TVUserAgentMode {
+        get { TVUserAgentMode(rawValue: userAgentModeRaw) ?? .desktopMac }
+        set { userAgentModeRaw = newValue.rawValue }
+    }
+}
+
 final class BrowserStore {
     static let shared = BrowserStore()
 
     private let bookmarksKey = "tvbrowser_bookmarks_v1"
     private let historyKey = "tvbrowser_history_v1"
+    private let webAppsKey = "tvbrowser_webapps_v1"
     private let zoomKey = "tvbrowser_zoom_v1"
+    private let userAgentKey = "tvbrowser_ua_mode_v1"
+    private let searchEngineKey = "tvbrowser_search_engine_v1"
     private let keychainService = "com.local.tvbrowser.credentials"
     private let keychainAccount = "saved_credentials_json"
-    private let maxHistoryCount = 100
+    private let maxHistoryCount = 150
 
     private(set) var bookmarks: [BookmarkItem] = []
     private(set) var history: [HistoryItem] = []
+    private(set) var webApps: [WebAppItem] = []
     private(set) var credentials: [SavedCredential] = []
 
     var pageZoom: Double {
         get {
             let val = UserDefaults.standard.double(forKey: zoomKey)
-            return val > 0 ? val : 1.3
+            return val > 0 ? val : 1.25
         }
         set {
-            let clamped = max(0.8, min(2.2, newValue))
+            let clamped = max(0.75, min(2.2, newValue))
             UserDefaults.standard.set(clamped, forKey: zoomKey)
+        }
+    }
+
+    var defaultUserAgentMode: TVUserAgentMode {
+        get {
+            let raw = UserDefaults.standard.object(forKey: userAgentKey) as? Int ?? 0
+            return TVUserAgentMode(rawValue: raw) ?? .desktopMac
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: userAgentKey)
+        }
+    }
+
+    var searchEngine: SearchEngineOption {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: searchEngineKey),
+                  let val = SearchEngineOption(rawValue: raw) else {
+                return .google
+            }
+            return val
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: searchEngineKey)
         }
     }
 
@@ -55,10 +124,10 @@ final class BrowserStore {
         } else {
             bookmarks = [
                 BookmarkItem(title: "Google", urlString: "https://www.google.com"),
-                BookmarkItem(title: "Cuenta de Google", urlString: "https://accounts.google.com"),
-                BookmarkItem(title: "DuckDuckGo", urlString: "https://duckduckgo.com"),
                 BookmarkItem(title: "YouTube", urlString: "https://www.youtube.com"),
-                BookmarkItem(title: "Wikipedia", urlString: "https://es.wikipedia.org")
+                BookmarkItem(title: "DuckDuckGo", urlString: "https://duckduckgo.com"),
+                BookmarkItem(title: "Wikipedia", urlString: "https://es.wikipedia.org"),
+                BookmarkItem(title: "GitHub", urlString: "https://github.com")
             ]
             saveBookmarks()
         }
@@ -66,6 +135,11 @@ final class BrowserStore {
         if let data = UserDefaults.standard.data(forKey: historyKey),
            let decoded = try? JSONDecoder().decode([HistoryItem].self, from: data) {
             history = decoded
+        }
+
+        if let data = UserDefaults.standard.data(forKey: webAppsKey),
+           let decoded = try? JSONDecoder().decode([WebAppItem].self, from: data) {
+            webApps = decoded
         }
 
         credentials = loadCredentialsFromKeychain()
@@ -89,14 +163,110 @@ final class BrowserStore {
         saveBookmarks()
     }
 
+    func removeBookmark(urlString: String) {
+        bookmarks.removeAll { $0.urlString == urlString }
+        saveBookmarks()
+    }
+
     func isBookmarked(urlString: String) -> Bool {
         bookmarks.contains { $0.urlString == urlString }
+    }
+
+    @discardableResult
+    func importBookmarksHTML(_ html: String) -> Int {
+        let pattern = #"<A[^>]*HREF\s*=\s*"([^"]+)"[^>]*>(.*?)</A>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return 0
+        }
+        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        let matches = regex.matches(in: html, options: [], range: nsRange)
+        var added = 0
+        for m in matches {
+            guard let hrefRange = Range(m.range(at: 1), in: html),
+                  let titleRange = Range(m.range(at: 2), in: html) else { continue }
+            let rawURL = String(html[hrefRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let url = URL(string: rawURL),
+                  let scheme = url.scheme?.lowercased(),
+                  ["http", "https"].contains(scheme) else { continue }
+            let rawTitle = String(html[titleRange])
+                .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                .replacingOccurrences(of: "&amp;", with: "&")
+                .replacingOccurrences(of: "&lt;", with: "<")
+                .replacingOccurrences(of: "&gt;", with: ">")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !isBookmarked(urlString: url.absoluteString) {
+                bookmarks.append(BookmarkItem(title: rawTitle.isEmpty ? (url.host ?? url.absoluteString) : rawTitle, urlString: url.absoluteString))
+                added += 1
+            }
+        }
+        if added > 0 { saveBookmarks() }
+        return added
+    }
+
+    // MARK: - WebApps
+
+    var autoLaunchWebApp: WebAppItem? {
+        webApps.first { $0.autoLaunch }
+    }
+
+    func saveWebApp(
+        title: String,
+        urlString: String,
+        userAgentMode: TVUserAgentMode,
+        zoom: Double,
+        adBlockEnabled: Bool,
+        autoLaunch: Bool
+    ) -> WebAppItem {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalTitle = cleanTitle.isEmpty ? (URL(string: urlString)?.host ?? urlString) : cleanTitle
+        if autoLaunch {
+            for i in webApps.indices { webApps[i].autoLaunch = false }
+        }
+        if let idx = webApps.firstIndex(where: { $0.urlString == urlString }) {
+            var existing = webApps[idx]
+            existing.title = finalTitle
+            existing.userAgentMode = userAgentMode
+            existing.zoom = zoom
+            existing.adBlockEnabled = adBlockEnabled
+            existing.autoLaunch = autoLaunch
+            webApps[idx] = existing
+            saveWebApps()
+            return existing
+        }
+        let item = WebAppItem(
+            id: UUID(),
+            title: finalTitle,
+            urlString: urlString,
+            userAgentModeRaw: userAgentMode.rawValue,
+            zoom: zoom,
+            adBlockEnabled: adBlockEnabled,
+            autoLaunch: autoLaunch,
+            createdAt: Date()
+        )
+        webApps.insert(item, at: 0)
+        saveWebApps()
+        return item
+    }
+
+    func toggleAutoLaunch(webAppID: UUID) {
+        guard let targetIdx = webApps.firstIndex(where: { $0.id == webAppID }) else { return }
+        let nextState = !webApps[targetIdx].autoLaunch
+        for i in webApps.indices { webApps[i].autoLaunch = false }
+        webApps[targetIdx].autoLaunch = nextState
+        saveWebApps()
+    }
+
+    func removeWebApp(id: UUID) {
+        webApps.removeAll { $0.id == id }
+        saveWebApps()
     }
 
     // MARK: - History
 
     func recordHistory(title: String, urlString: String) {
-        guard !urlString.isEmpty, urlString != "about:blank" else { return }
+        guard !urlString.isEmpty,
+              urlString != "about:blank",
+              !urlString.hasPrefix("data:") else { return }
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayTitle = cleanTitle.isEmpty ? urlString : cleanTitle
 
@@ -109,6 +279,19 @@ final class BrowserStore {
             history = Array(history.prefix(maxHistoryCount))
         }
         saveHistory()
+    }
+
+    func recentUniqueHistory(limit: Int = 8) -> [HistoryItem] {
+        var seen = Set<String>()
+        var result: [HistoryItem] = []
+        for item in history {
+            if !seen.contains(item.urlString) {
+                seen.insert(item.urlString)
+                result.append(item)
+                if result.count >= limit { break }
+            }
+        }
+        return result
     }
 
     func clearHistory() {
@@ -194,6 +377,12 @@ final class BrowserStore {
         }
     }
 
+    private func saveWebApps() {
+        if let data = try? JSONEncoder().encode(webApps) {
+            UserDefaults.standard.set(data, forKey: webAppsKey)
+        }
+    }
+
     private func saveCredentialsToKeychain(_ items: [SavedCredential]) {
         guard let data = try? JSONEncoder().encode(items) else { return }
         let query: [String: Any] = [
@@ -205,6 +394,7 @@ final class BrowserStore {
 
         var addQuery = query
         addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(addQuery as CFDictionary, nil)
     }
 

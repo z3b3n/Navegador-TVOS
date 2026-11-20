@@ -22,6 +22,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
         CODE_SIGN_STYLE: Automatic
     dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: AVKit.framework
       - sdk: GameController.framework
       - sdk: Network.framework
       - sdk: Security.framework
