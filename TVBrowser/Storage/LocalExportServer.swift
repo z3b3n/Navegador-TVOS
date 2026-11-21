@@ -36,6 +36,12 @@ final class LocalExportServer {
         do {
             let params = NWParameters.tcp
             params.allowLocalEndpointReuse = true
+            if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+                tcp.enableKeepalive = true
+                tcp.keepaliveIdle = 10
+                tcp.keepaliveInterval = 5
+                tcp.keepaliveCount = 3
+            }
 
             let listener: NWListener
             if let desiredPort = desiredPort {
@@ -210,6 +216,8 @@ final class LocalExportServer {
             }
         case "/manifest.json":
             sendHTTPResponse(connection: connection, status: "200 OK", contentType: "application/manifest+json; charset=utf-8", filename: nil, body: manifestJSON())
+        case "/ping":
+            sendHTTPResponse(connection: connection, status: "200 OK", contentType: "application/json; charset=utf-8", filename: nil, body: "{\"ok\":true}")
         default:
             DispatchQueue.main.async {
                 let bmCount = BrowserStore.shared.bookmarks.count
@@ -364,11 +372,24 @@ final class LocalExportServer {
                 pong.append(payload.prefix(125))
                 client.connection.send(content: pong, completion: .contentProcessed { _ in })
             case 0x1, 0x0: // Text / Continuation
-                dispatchJSONCommand(payload)
+                if let obj = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+                   (obj["type"] as? String) == "ping" {
+                    sendWebSocketText("{\"type\":\"pong\"}", to: client)
+                } else {
+                    dispatchJSONCommand(payload)
+                }
             default:
                 break
             }
         }
+    }
+
+    private func sendWebSocketText(_ text: String, to client: WebSocketClient) {
+        let data = Data(text.utf8)
+        guard data.count < 126 else { return }
+        var frame = Data([0x81, UInt8(data.count)])
+        frame.append(data)
+        client.connection.send(content: frame, completion: .contentProcessed { _ in })
     }
 
     private func dispatchJSONCommand(_ data: Data) {
@@ -498,7 +519,7 @@ final class LocalExportServer {
         <body>
             <header>
                 <h1>TVBrowser · Control Remoto</h1>
-                <span id="status" class="badge">Conectando...</span>
+                <button id="status" class="badge" style="border:0;cursor:pointer;" onclick="forceReconnectWS()">Conectando...</button>
             </header>
 
             <div class="row">
@@ -573,6 +594,11 @@ final class LocalExportServer {
 
             <script>
                 let ws = null;
+                let wsAlive = false;
+                let reconnectTimer = null;
+                let heartbeatTimer = null;
+                let pongDeadlineTimer = null;
+                let wakeLock = null;
                 let lastTouches = [];
                 let tapStart = 0;
                 let tapMoved = false;
@@ -585,24 +611,136 @@ final class LocalExportServer {
                 let moveBuf = { dx: 0, dy: 0 };
                 let rafScheduled = false;
 
+                async function requestWakeLock() {
+                    try {
+                        if ('wakeLock' in navigator && !wakeLock && document.visibilityState === 'visible') {
+                            wakeLock = await navigator.wakeLock.request('screen');
+                            wakeLock.addEventListener('release', () => { wakeLock = null; });
+                        }
+                    } catch (e) {}
+                }
+
+                function stopHeartbeat() {
+                    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+                    if (pongDeadlineTimer) { clearTimeout(pongDeadlineTimer); pongDeadlineTimer = null; }
+                }
+
+                function startHeartbeat() {
+                    stopHeartbeat();
+                    heartbeatTimer = setInterval(() => {
+                        if (document.visibilityState !== 'visible') return;
+                        if (!ws || ws.readyState !== 1) {
+                            forceReconnectWS();
+                            return;
+                        }
+                        try {
+                            ws.send('{"type":"ping"}');
+                            if (pongDeadlineTimer) clearTimeout(pongDeadlineTimer);
+                            pongDeadlineTimer = setTimeout(() => {
+                                wsAlive = false;
+                                forceReconnectWS();
+                            }, 2500);
+                        } catch (e) {
+                            wsAlive = false;
+                            forceReconnectWS();
+                        }
+                    }, 4000);
+                }
+
+                function forceReconnectWS() {
+                    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                    stopHeartbeat();
+                    wsAlive = false;
+                    if (ws) {
+                        const old = ws;
+                        ws = null;
+                        old.onopen = null; old.onclose = null; old.onmessage = null; old.onerror = null;
+                        try { old.close(); } catch (e) {}
+                    }
+                    connectWS();
+                }
+
                 function connectWS() {
+                    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
                     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    ws = new WebSocket(proto + '//' + location.host + '/ws');
                     const badge = document.getElementById('status');
-                    ws.onopen = () => { badge.textContent = 'Conectado'; badge.className = 'badge ok'; };
-                    ws.onclose = () => {
-                        badge.textContent = 'Reconectando...'; badge.className = 'badge';
-                        setTimeout(connectWS, 1200);
+                    badge.textContent = 'Conectando...';
+                    badge.className = 'badge';
+
+                    const sock = new WebSocket(proto + '//' + location.host + '/ws');
+                    ws = sock;
+                    sock.onopen = () => {
+                        if (ws !== sock) return;
+                        wsAlive = true;
+                        badge.textContent = 'Conectado';
+                        badge.className = 'badge ok';
+                        startHeartbeat();
+                    };
+                    sock.onmessage = (ev) => {
+                        if (ws !== sock) return;
+                        wsAlive = true;
+                        if (pongDeadlineTimer) { clearTimeout(pongDeadlineTimer); pongDeadlineTimer = null; }
+                        try {
+                            const msg = JSON.parse(ev.data);
+                            if (msg && msg.type === 'pong') {
+                                badge.textContent = 'Conectado';
+                                badge.className = 'badge ok';
+                            }
+                        } catch (e) {}
+                    };
+                    sock.onerror = () => {
+                        if (ws !== sock) return;
+                        wsAlive = false;
+                    };
+                    sock.onclose = () => {
+                        if (ws !== sock) return;
+                        wsAlive = false;
+                        stopHeartbeat();
+                        badge.textContent = 'Reconectando...';
+                        badge.className = 'badge';
+                        if (!reconnectTimer) {
+                            reconnectTimer = setTimeout(connectWS, 700);
+                        }
                     };
                 }
                 connectWS();
 
-                function send(obj) {
-                    if (ws && ws.readyState === 1) {
-                        ws.send(JSON.stringify(obj));
+                function handleResume() {
+                    if (document.visibilityState === 'hidden') return;
+                    requestWakeLock();
+                    if (!ws || ws.readyState !== 1 || !wsAlive) {
+                        forceReconnectWS();
                     } else {
-                        fetch('/cmd', { method: 'POST', body: JSON.stringify(obj) }).catch(() => {});
+                        try {
+                            ws.send('{"type":"ping"}');
+                            if (pongDeadlineTimer) clearTimeout(pongDeadlineTimer);
+                            pongDeadlineTimer = setTimeout(() => {
+                                wsAlive = false;
+                                forceReconnectWS();
+                            }, 1200);
+                        } catch (e) {
+                            forceReconnectWS();
+                        }
                     }
+                }
+                document.addEventListener('visibilitychange', handleResume);
+                window.addEventListener('pageshow', handleResume);
+                window.addEventListener('focus', handleResume);
+                window.addEventListener('online', handleResume);
+
+                function send(obj) {
+                    if (ws && ws.readyState === 1 && wsAlive) {
+                        try {
+                            ws.send(JSON.stringify(obj));
+                            return;
+                        } catch (e) {
+                            wsAlive = false;
+                            forceReconnectWS();
+                        }
+                    }
+                    fetch('/cmd', { method: 'POST', body: JSON.stringify(obj), keepalive: true })
+                        .then(() => { if (!ws || ws.readyState !== 1) forceReconnectWS(); })
+                        .catch(() => {});
                 }
                 function act(name) { send({ type: 'action', name }); }
 
@@ -760,7 +898,26 @@ final class LocalExportServer {
                 }
 
                 const kbInput = document.getElementById('kbInput');
-                kbInput.addEventListener('input', () => {
+                let kbComposing = false;
+                kbInput.addEventListener('focus', () => {
+                    requestWakeLock();
+                    if (!ws || ws.readyState !== 1 || !wsAlive) forceReconnectWS();
+                });
+                kbInput.addEventListener('compositionstart', () => { kbComposing = true; });
+                kbInput.addEventListener('compositionend', () => {
+                    kbComposing = false;
+                    const v = kbInput.value;
+                    if (v) {
+                        send({ type: 'text', value: v });
+                        kbInput.value = '';
+                    }
+                });
+                kbInput.addEventListener('input', e => {
+                    if (e && e.inputType === 'deleteContentBackward' && kbInput.value === '') {
+                        send({ type: 'key', code: 'Backspace' });
+                        return;
+                    }
+                    if (kbComposing) return;
                     const v = kbInput.value;
                     if (v) {
                         send({ type: 'text', value: v });
@@ -772,6 +929,10 @@ final class LocalExportServer {
                         send({ type: 'key', code: 'Backspace' });
                     } else if (e.key === 'Enter') {
                         e.preventDefault();
+                        if (kbInput.value) {
+                            send({ type: 'text', value: kbInput.value });
+                            kbInput.value = '';
+                        }
                         send({ type: 'key', code: 'Enter' });
                     } else if (e.key === 'Tab') {
                         e.preventDefault();

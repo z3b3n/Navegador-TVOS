@@ -2275,6 +2275,11 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     }
 
     private func typeDirectlyIntoWebInput(_ text: String) {
+        if let alert = topPresenter() as? UIAlertController, let tf = alert.textFields?.first {
+            tf.text = (tf.text ?? "") + text
+            tf.sendActions(for: .editingChanged)
+            return
+        }
         let jsonData = (try? JSONSerialization.data(withJSONObject: [text])) ?? Data("[\"\"]".utf8)
         let jsonArray = String(data: jsonData, encoding: .utf8) ?? "[\"\"]"
 
@@ -2282,7 +2287,11 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         (function() {
             var ch = \(jsonArray)[0];
             var el = window.__tvBrowserActiveInput || document.activeElement;
-            if (!el || el === document.body) return;
+            if (!el || el === document.body) {
+                el = document.querySelector('input[type="search"], input[name="q"], textarea[name="q"], input[type="text"], textarea');
+                if (!el) return;
+                window.__tvBrowserActiveInput = el;
+            }
             try { el.focus(); } catch (e) {}
 
             if (el.isContentEditable) {
@@ -2419,6 +2428,27 @@ extension BrowserViewController: InputControllerDelegate {
     }
 
     func inputControllerDidSendKeyboardAction(_ action: WebKeyboardAction) {
+        if let alert = topPresenter() as? UIAlertController, let tf = alert.textFields?.first {
+            switch action {
+            case .backspace:
+                if var cur = tf.text, !cur.isEmpty {
+                    cur.removeLast()
+                    tf.text = cur
+                    tf.sendActions(for: .editingChanged)
+                }
+                return
+            case .enter:
+                tf.sendActions(for: .editingDidEndOnExit)
+                return
+            case .escape:
+                alert.dismiss(animated: true) { [weak self] in
+                    self?.restoreBrowserFocus()
+                }
+                return
+            default:
+                return
+            }
+        }
         let js: String
         switch action {
         case .enter:
