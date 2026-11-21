@@ -184,7 +184,7 @@ final class InputController {
         }
     }
 
-    func handlePressesBegan(_ presses: Set<UIPress>, allowToolbarToggle: Bool) -> Bool {
+    func handlePressesBegan(_ presses: Set<UIPress>, allowToolbarToggle: Bool, interceptMenu: Bool = true) -> Bool {
         var handled = false
         let immediateStep: CGFloat = 24.0
         let webInputActive = delegate?.inputControllerIsWebInputFocused() ?? false
@@ -299,12 +299,15 @@ final class InputController {
                 }
                 handled = true
             case .menu:
+                guard interceptMenu else { break }
                 menuLongFired = false
                 menuLongTimer?.invalidate()
-                menuLongTimer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
-                    guard let self = self else { return }
-                    self.menuLongFired = true
-                    self.delegate?.inputControllerDidToggleToolbar()
+                if allowToolbarToggle {
+                    menuLongTimer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
+                        guard let self = self else { return }
+                        self.menuLongFired = true
+                        self.delegate?.inputControllerDidToggleToolbar()
+                    }
                 }
                 handled = true
             default:
@@ -314,7 +317,7 @@ final class InputController {
         return handled
     }
 
-    func handlePressesEnded(_ presses: Set<UIPress>) -> Bool {
+    func handlePressesEnded(_ presses: Set<UIPress>, interceptMenu: Bool = true) -> Bool {
         var handled = false
         for press in presses {
             switch press.type {
@@ -346,6 +349,10 @@ final class InputController {
             case .menu:
                 menuLongTimer?.invalidate()
                 menuLongTimer = nil
+                guard interceptMenu else {
+                    menuLongFired = false
+                    break
+                }
                 if !menuLongFired {
                     delegate?.inputControllerDidPressBack()
                 }

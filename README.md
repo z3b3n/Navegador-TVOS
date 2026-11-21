@@ -35,8 +35,8 @@ Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la
 * **Mantener pulsado Seleccionar / OK (≥ 0,6 s):** Abre el **Menú rápido del mando** desde cualquier punto de la página (Buscar/URL, Barra completa, Escala/Zoom, Cursor/Scroll, Inicio, Pestañas, Control Remoto iPhone).
 * **Deslizar en el touchpad o cruceta (D-Pad):** Mueve el cursor virtual (en *Modo Cursor*) o hace scroll con inercia (en *Modo Scroll*). Al llevar el puntero al borde inferior/superior de la pantalla hace scroll automático.
 * **Play / Pausa (toque corto):** Alterna entre **Modo Cursor** y **Modo Scroll**.
-* **Menú (toque corto):** Atrás en el historial; si no hay historial atrás, abre/cierra la barra superior.
-* **Play / Pausa o Menú (pulsación larga ≥ 0,45 s):** Abre o cierra la **barra Safari** desde cualquier página o WebApp.
+* **Menú (toque corto):** Atrás en el historial (o cierra la pestaña secundaria); en la pantalla raíz sin historial sale al menú principal de Apple TV.
+* **Play / Pausa (pulsación larga ≥ 0,45 s) o Menú largo:** Abre o cierra la **barra Safari** desde cualquier página o WebApp.
 
 ### Teclado Bluetooth físico
 * **Escribir directamente** cuando un campo de texto web está enfocado (incluye `Backspace`, `Enter`, `Tab`, `Esc`).

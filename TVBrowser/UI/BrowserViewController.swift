@@ -287,8 +287,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     }
 
     private func updateMiniBarState() {
-        let canBack = currentEngine?.canGoBack ?? false
-        miniBackChip.alpha = canBack ? 1.0 : 0.40
+        miniBackChip.alpha = canNavigateBackOrCloseTab ? 1.0 : 0.40
 
         if let currentURL = currentEngine?.currentURL ?? activeTab?.url {
             let host = currentURL.host?.replacingOccurrences(of: "www.", with: "") ?? currentURL.absoluteString
@@ -569,7 +568,12 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             openTab(url: homeSearchURL, switchToIt: true)
             return
         }
-        let nextIndex = min(activeTabIndex, tabs.count - 1)
+        let nextIndex: Int
+        if index < activeTabIndex {
+            nextIndex = activeTabIndex - 1
+        } else {
+            nextIndex = min(activeTabIndex, tabs.count - 1)
+        }
         switchToTab(at: nextIndex)
     }
 
@@ -693,7 +697,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     }
 
     private func updateToolbarState() {
-        let canBack = currentEngine?.canGoBack ?? false
+        let canBack = canNavigateBackOrCloseTab
         let canForward = currentEngine?.canGoForward ?? false
         backButton.isEnabled = canBack
         backButton.alpha = canBack ? 1.0 : 0.35
@@ -726,7 +730,11 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     // MARK: - Toolbar & Shortcut Actions
 
     @objc private func backTapped() {
-        currentEngine?.goBack()
+        if currentEngine?.canGoBack == true {
+            currentEngine?.goBack()
+        } else if tabs.count > 1 {
+            closeTab(at: activeTabIndex)
+        }
         updateToolbarState()
     }
 
@@ -1569,6 +1577,10 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         }
     }
 
+    private var canNavigateBackOrCloseTab: Bool {
+        (currentEngine?.canGoBack == true) || tabs.count > 1
+    }
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         if presentedViewController != nil {
             super.pressesBegan(presses, with: event)
@@ -1583,7 +1595,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             return
         }
 
-        if inputController.handlePressesBegan(presses, allowToolbarToggle: true) {
+        if inputController.handlePressesBegan(presses, allowToolbarToggle: true, interceptMenu: canNavigateBackOrCloseTab) {
             return
         }
         super.pressesBegan(presses, with: event)
@@ -1604,7 +1616,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             return
         }
 
-        if inputController.handlePressesEnded(presses) {
+        if inputController.handlePressesEnded(presses, interceptMenu: canNavigateBackOrCloseTab) {
             return
         }
         super.pressesEnded(presses, with: event)
@@ -2404,8 +2416,9 @@ extension BrowserViewController: InputControllerDelegate {
             setToolbarVisible(false)
         } else if currentEngine?.canGoBack == true {
             currentEngine?.goBack()
-        } else {
-            setToolbarVisible(true)
+        } else if tabs.count > 1 {
+            closeTab(at: activeTabIndex)
+            showToast("Pestaña cerrada")
         }
     }
 
