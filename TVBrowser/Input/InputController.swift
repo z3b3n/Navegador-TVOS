@@ -16,6 +16,7 @@ protocol InputControllerDelegate: AnyObject {
     func inputControllerDidMoveCursor(delta: CGPoint)
     func inputControllerDidScroll(delta: CGPoint)
     func inputControllerDidClick()
+    func inputControllerDidLongPressSelect()
     func inputControllerDidToggleMode()
     func inputControllerDidPressBack()
     func inputControllerDidPressForward()
@@ -41,6 +42,8 @@ final class InputController {
     private var playPauseLongFired = false
     private var menuLongTimer: Timer?
     private var menuLongFired = false
+    private var selectLongTimer: Timer?
+    private var selectLongFired = false
     private var selectPressActive = false
     private var selectPannedSignificantly = false
 
@@ -53,12 +56,15 @@ final class InputController {
     private var lastRightShoulder = false
 
     private let longPressThreshold: TimeInterval = 0.45
+    private let selectLongPressThreshold: TimeInterval = 0.60
 
     var isSelectPressed: Bool { selectPressActive }
 
     func markSelectPanMoved() {
         if selectPressActive {
             selectPannedSignificantly = true
+            selectLongTimer?.invalidate()
+            selectLongTimer = nil
         }
     }
 
@@ -119,6 +125,8 @@ final class InputController {
         playPauseLongTimer = nil
         menuLongTimer?.invalidate()
         menuLongTimer = nil
+        selectLongTimer?.invalidate()
+        selectLongTimer = nil
     }
 
     @objc private func controllerDidDisconnect(_ note: Notification) {
@@ -178,7 +186,7 @@ final class InputController {
 
     func handlePressesBegan(_ presses: Set<UIPress>, allowToolbarToggle: Bool) -> Bool {
         var handled = false
-        let immediateStep: CGFloat = 22.0
+        let immediateStep: CGFloat = 24.0
         let webInputActive = delegate?.inputControllerIsWebInputFocused() ?? false
 
         for press in presses {
@@ -271,6 +279,13 @@ final class InputController {
             case .select:
                 selectPressActive = true
                 selectPannedSignificantly = false
+                selectLongFired = false
+                selectLongTimer?.invalidate()
+                selectLongTimer = Timer.scheduledTimer(withTimeInterval: selectLongPressThreshold, repeats: false) { [weak self] _ in
+                    guard let self = self, self.selectPressActive, !self.selectPannedSignificantly else { return }
+                    self.selectLongFired = true
+                    self.delegate?.inputControllerDidLongPressSelect()
+                }
                 handled = true
             case .playPause:
                 playPauseLongFired = false
@@ -310,9 +325,12 @@ final class InputController {
                 }
                 handled = true
             case .select:
-                let shouldClick = selectPressActive && !selectPannedSignificantly
+                selectLongTimer?.invalidate()
+                selectLongTimer = nil
+                let shouldClick = selectPressActive && !selectPannedSignificantly && !selectLongFired
                 selectPressActive = false
                 selectPannedSignificantly = false
+                selectLongFired = false
                 if shouldClick {
                     delegate?.inputControllerDidClick()
                 }
@@ -347,8 +365,11 @@ final class InputController {
                 activeDirections.remove(press.type)
                 if activeDirections.isEmpty { dpadHoldDuration = 0 }
             case .select:
+                selectLongTimer?.invalidate()
+                selectLongTimer = nil
                 selectPressActive = false
                 selectPannedSignificantly = false
+                selectLongFired = false
             case .playPause:
                 playPauseLongTimer?.invalidate()
                 playPauseLongTimer = nil
@@ -370,7 +391,7 @@ final class InputController {
         // 1. D-Pad / Arrow keys movement with smooth acceleration
         if !activeDirections.isEmpty {
             dpadHoldDuration += dt
-            let speed: CGFloat = min(20.0, 7.5 + CGFloat(dpadHoldDuration) * 15.0)
+            let speed: CGFloat = min(26.0, 9.0 + CGFloat(dpadHoldDuration) * 18.0)
             var dx: CGFloat = 0
             var dy: CGFloat = 0
             if activeDirections.contains(.leftArrow) { dx -= speed }

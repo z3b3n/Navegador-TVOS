@@ -30,9 +30,10 @@ Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la
 
 ## Controles
 
-### Siri Remote / Mando Apple TV / Mando IR
-* **Deslizar en el touchpad o cruceta (D-Pad):** Mueve el cursor virtual (en *Modo Cursor*) o hace scroll con inercia (en *Modo Scroll*).
-* **Botón central (Seleccionar):** Clic en el elemento bajo el cursor (abre teclado tvOS en campos de texto o menú nativo en `<select>`).
+### Siri Remote / Mando de TV compatible / Mando iPhone
+* **Barra rápida superior siempre accesible (`◀` · `🔍 Buscar/URL` · `🎯 Cursor/Scroll` · `100%` · `☰ Menú`):** Mueve el puntero arriba del todo y pulsa **OK/Seleccionar** para abrir la barra de direcciones, cambiar de modo, ajustar la escala del televisor o abrir la barra completa de Safari sin memorizar atajos.
+* **Mantener pulsado Seleccionar / OK (≥ 0,6 s):** Abre el **Menú rápido del mando** desde cualquier punto de la página (Buscar/URL, Barra completa, Escala/Zoom, Cursor/Scroll, Inicio, Pestañas, Control Remoto iPhone).
+* **Deslizar en el touchpad o cruceta (D-Pad):** Mueve el cursor virtual (en *Modo Cursor*) o hace scroll con inercia (en *Modo Scroll*). Al llevar el puntero al borde inferior/superior de la pantalla hace scroll automático.
 * **Play / Pausa (toque corto):** Alterna entre **Modo Cursor** y **Modo Scroll**.
 * **Menú (toque corto):** Atrás en el historial; si no hay historial atrás, abre/cierra la barra superior.
 * **Play / Pausa o Menú (pulsación larga ≥ 0,45 s):** Abre o cierra la **barra Safari** desde cualquier página o WebApp.
@@ -49,10 +50,14 @@ Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la
 * **X / Cuadrado (`□`):** Mostrar / ocultar barra Safari · **Y / Triángulo (`△`):** Cambiar Cursor/Scroll
 * **L1/LB y R1/RB:** Atrás / Adelante
 
-### Ratón / Trackpad desde Móvil o PC (PWA Local)
-1. Abre `⋯ → Control Remoto (Ratón/Teclado/QR)` en el Apple TV.
-2. Escanea el QR o entra en `http://<IP-APPLE-TV>:8080` desde tu móvil u ordenador.
-3. Pulsa *"Seguir navegando (dejar activo)"* en la tele: el servidor sigue activo en segundo plano para mover el cursor con el **ratón de tu PC** o el **trackpad de tu iPhone** y escribir con su teclado.
+### Ratón / Trackpad / Gestos desde iPhone o PC (PWA Local)
+1. Abre `⋯ → Control Remoto QR` (o mantén **OK** → *Control Remoto desde iPhone*) en el Apple TV.
+2. Escanea el QR o entra en `http://<IP-APPLE-TV>:8080` desde Safari en tu iPhone o tu ordenador.
+3. Pulsa *"Seguir navegando (dejar activo)"* en la tele:
+   * **1 dedo:** mover puntero · **Toque:** clic.
+   * **2 dedos (deslizar):** scroll suave.
+   * **2 dedos (pellizcar):** ampliar o reducir la escala en directo en la tele (también disponible mediante deslizador y presets `100%–210%`).
+   * **Modo Ratón PC (Pointer Lock):** control directo con ratón y rueda desde ordenador.
 
 ---
 
