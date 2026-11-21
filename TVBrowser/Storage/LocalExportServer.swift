@@ -509,7 +509,7 @@ final class LocalExportServer {
             <div id="pad">
                 <span><strong>Trackpad / Ratón en directo</strong><br>
                 1 dedo: mover cursor · Toque: clic<br>
-                2 dedos: scroll · En PC: haz clic en "Ratón PC"</span>
+                2 dedos: scroll · Pellizcar (2 dedos): ampliar/reducir escala</span>
             </div>
 
             <div class="row">
@@ -576,6 +576,11 @@ final class LocalExportServer {
                 let lastTouches = [];
                 let tapStart = 0;
                 let tapMoved = false;
+                let pinchStartDist = 0;
+                let pinchStartZoom = 1.0;
+                let pinchActive = false;
+                let lastPinchSentAt = 0;
+                let lastPinchPct = 0;
                 let lastMouse = null;
                 let moveBuf = { dx: 0, dy: 0 };
                 let rafScheduled = false;
@@ -633,26 +638,63 @@ final class LocalExportServer {
                 }
 
                 const pad = document.getElementById('pad');
+                function touchDist(a, b) {
+                    return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+                }
+
+                pad.addEventListener('gesturestart', e => e.preventDefault(), { passive: false });
+                pad.addEventListener('gesturechange', e => e.preventDefault(), { passive: false });
+                pad.addEventListener('gestureend', e => e.preventDefault(), { passive: false });
+
                 pad.addEventListener('touchstart', e => {
                     e.preventDefault();
                     lastTouches = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }));
-                    tapStart = Date.now();
-                    tapMoved = false;
+                    if (e.touches.length === 1) {
+                        tapStart = Date.now();
+                        tapMoved = false;
+                        pinchActive = false;
+                        pinchStartDist = 0;
+                    } else if (e.touches.length >= 2) {
+                        tapMoved = true;
+                        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+                        pinchStartZoom = (parseInt(zoomSlider.value, 10) || 100) / 100.0;
+                        pinchActive = false;
+                        lastPinchPct = parseInt(zoomSlider.value, 10) || 100;
+                    }
                 }, { passive: false });
 
                 pad.addEventListener('touchmove', e => {
                     e.preventDefault();
                     const cur = Array.from(e.touches);
-                    if (cur.length === 1 && lastTouches.length === 1) {
+                    if (cur.length === 1 && lastTouches.length === 1 && !pinchActive) {
                         const dx = (cur[0].clientX - lastTouches[0].x) * 2.2;
                         const dy = (cur[0].clientY - lastTouches[0].y) * 2.2;
                         if (Math.hypot(dx, dy) > 3) tapMoved = true;
                         queueMove(dx, dy);
                     } else if (cur.length >= 2 && lastTouches.length >= 2) {
                         tapMoved = true;
-                        const dy = ((cur[0].clientY - lastTouches[0].y) + (cur[1].clientY - lastTouches[1].y)) * 0.5;
-                        const dx = ((cur[0].clientX - lastTouches[0].x) + (cur[1].clientX - lastTouches[1].x)) * 0.5;
-                        send({ type: 'scroll', dx: -dx * 2.4, dy: -dy * 2.4 });
+                        const curDist = touchDist(cur[0], cur[1]);
+                        if (pinchStartDist <= 0) {
+                            pinchStartDist = curDist;
+                            pinchStartZoom = (parseInt(zoomSlider.value, 10) || 100) / 100.0;
+                        }
+                        if (!pinchActive && Math.abs(curDist - pinchStartDist) > 16) {
+                            pinchActive = true;
+                        }
+                        if (pinchActive) {
+                            const scale = curDist / Math.max(24, pinchStartDist);
+                            const nextPct = Math.max(75, Math.min(250, Math.round((pinchStartZoom * scale * 100) / 5) * 5));
+                            const now = Date.now();
+                            if (nextPct !== lastPinchPct && (now - lastPinchSentAt >= 55 || Math.abs(nextPct - lastPinchPct) >= 5)) {
+                                lastPinchSentAt = now;
+                                lastPinchPct = nextPct;
+                                applyZoomPct(nextPct);
+                            }
+                        } else {
+                            const dy = ((cur[0].clientY - lastTouches[0].y) + (cur[1].clientY - lastTouches[1].y)) * 0.5;
+                            const dx = ((cur[0].clientX - lastTouches[0].x) + (cur[1].clientX - lastTouches[1].x)) * 0.5;
+                            send({ type: 'scroll', dx: -dx * 2.4, dy: -dy * 2.4 });
+                        }
                     }
                     lastTouches = cur.map(t => ({ x: t.clientX, y: t.clientY }));
                 }, { passive: false });
@@ -661,6 +703,10 @@ final class LocalExportServer {
                     e.preventDefault();
                     if (!tapMoved && Date.now() - tapStart < 280 && e.touches.length === 0) {
                         send({ type: 'click' });
+                    }
+                    if (e.touches.length < 2) {
+                        pinchActive = false;
+                        pinchStartDist = 0;
                     }
                     lastTouches = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }));
                 }, { passive: false });
@@ -696,7 +742,12 @@ final class LocalExportServer {
                 pad.addEventListener('contextmenu', e => e.preventDefault());
                 pad.addEventListener('wheel', e => {
                     e.preventDefault();
-                    send({ type: 'scroll', dx: e.deltaX, dy: e.deltaY });
+                    if (e.ctrlKey) {
+                        const curPct = parseInt(zoomSlider.value, 10) || 100;
+                        applyZoomPct(curPct - e.deltaY * 1.2);
+                    } else {
+                        send({ type: 'scroll', dx: e.deltaX, dy: e.deltaY });
+                    }
                 }, { passive: false });
 
                 const urlInput = document.getElementById('urlInput');
