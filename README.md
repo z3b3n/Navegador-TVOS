@@ -7,7 +7,7 @@ Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la
 ## Novedades principales (v2.1)
 
 * **Interfaz estilo Safari inteligente y despejada:**
-  * Sin barra fija estorbando durante la navegación: al llevar el puntero arriba del todo estando en la parte superior de la página se despliega la barra grande de Safari (`◀`, `▶`, `⌂ Inicio`, búsqueda/URL con dominio SSL, `A-` / `%` / `A+`, `↻/✕`, `★`, `📺 Vídeo`, `❏ Pestañas`, `⋯ Menú`, `Listo`), y desaparece automáticamente tras ~6,5 s sin usarla.
+  * Sin barra fija estorbando durante la navegación: al llevar el puntero al borde superior (estés en la parte que estés de la página, sin tener que subir el scroll hasta arriba) se despliega al instante la barra grande de Safari (`◀`, `▶`, `⌂ Inicio`, búsqueda/URL con dominio SSL, `A-` / `%` / `A+`, `↻/✕`, `★`, `📺 Vídeo`, `↕ Scroll` / `🎯 Cursor`, `❏ Pestañas`, `⋯ Menú`, `Listo`), y desaparece automáticamente tras ~6,5 s sin usarla (o pulsando `↓`, `Menú` o `Listo`).
   * **Zoom nativo siempre centrado (75% – 250%, `140%` por defecto para TV 55"):** escala todo el viewport manteniendo cualquier página centrada sin descuadres laterales.
   * **Scroll progresivo y suave:** al acercar el puntero al borde inferior/superior la página avanza progresivamente con suavidad a 60 fps para parar en el punto exacto sin saltos bruscos.
   * **Página de Inicio (`⌂`):** añade accesos directos de la página actual o por URL, edítalos, reordénalos o elimínalos fácilmente desde **+ Añadir acceso** y **Editar accesos**.
@@ -32,9 +32,9 @@ Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la
 ## Controles
 
 ### Siri Remote / Mando de TV compatible / Mando iPhone
-* **Subir el puntero arriba del todo (en la parte superior de la web):** Despliega automáticamente la barra completa de Safari (se oculta sola al cabo de unos segundos si no la usas). Si estás a mitad de la página y subes el puntero, primero hará scroll suave hacia arriba.
+* **Subir el puntero al borde superior (desde cualquier parte de la web):** Despliega al instante la barra completa de Safari sin mover ni subir la página; desaparece sola tras ~6,5 s sin usarla (o al pulsar `↓`, `Menú` o `Listo`).
 * **Mantener pulsado Seleccionar / OK (≥ 0,6 s):** Abre el **Menú rápido del mando** desde cualquier punto de la página (Buscar/URL, Barra completa, Escala/Zoom, Cursor/Scroll, Inicio, Pestañas, Control Remoto iPhone).
-* **Deslizar en el touchpad o cruceta (D-Pad):** Mueve el cursor virtual (en *Modo Cursor*) o hace scroll suave (en *Modo Scroll*). Acerca el puntero hacia el borde inferior/superior para desplazarte suavemente por la página.
+* **Deslizar en el touchpad o cruceta (D-Pad):** Mueve el cursor virtual (en *Modo Cursor*, bajando suavemente al acercarlo al borde inferior) o hace scroll libre arriba/abajo (en *Modo Scroll*, accesible con **Play/Pausa** o el botón **`↕ Scroll`** de la barra).
 * **Play / Pausa (toque corto):** Alterna entre **Modo Cursor** y **Modo Scroll**.
 * **Menú (toque corto):** Atrás en el historial (o cierra la pestaña secundaria); en la pantalla raíz sin historial sale al menú principal de Apple TV.
 * **Play / Pausa (pulsación larga ≥ 0,45 s):** Abre o cierra manualmente la **barra Safari** desde cualquier página o WebApp.

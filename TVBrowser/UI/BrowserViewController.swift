@@ -38,6 +38,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private let reloadButton = UIButton(type: .custom)
     private let bookmarkStarButton = UIButton(type: .custom)
     private let videoButton = UIButton(type: .custom)
+    private let modeButton = UIButton(type: .custom)
     private let tabsButton = UIButton(type: .custom)
     private let moreButton = UIButton(type: .custom)
     private let hideToolbarButton = UIButton(type: .custom)
@@ -51,13 +52,11 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private var toolbarAutoHideWorkItem: DispatchWorkItem?
     private let toolbarInactivityTimeout: TimeInterval = 6.5
     private var suppressTopEdgeToolbarUntil: CFTimeInterval = 0
-    private var lastScrolledDownTime: CFTimeInterval = 0
     private var hasPositionedInitialCursor = false
     private var lastPanPoint: CGPoint = .zero
     private var panStartPoint: CGPoint = .zero
     private var isWebInputFocused = false
     private var cachedCursorOverInnerScroll = false
-    private var cachedPageCanScrollUp = false
     private var pendingScrollDelta: CGPoint = .zero
     private var innerScrollInFlight = false
     private var lastHoverCheckTime: CFTimeInterval = 0
@@ -222,27 +221,28 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         urlButton.titleLabel?.lineBreakMode = .byTruncatingMiddle
         urlButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
         urlButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        urlButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
+        urlButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
 
-        configureButton(zoomOutButton, title: "A-", action: #selector(zoomOutTapped), horizontalInset: 14)
-        configureButton(zoomLevelButton, title: "100%", action: #selector(presentZoomPresetPicker), horizontalInset: 14)
-        configureButton(zoomInButton, title: "A+", action: #selector(zoomInTapped), horizontalInset: 14)
+        configureButton(zoomOutButton, title: "A-", action: #selector(zoomOutTapped), horizontalInset: 12)
+        configureButton(zoomLevelButton, title: "140%", action: #selector(presentZoomPresetPicker), horizontalInset: 12)
+        configureButton(zoomInButton, title: "A+", action: #selector(zoomInTapped), horizontalInset: 12)
 
-        configureButton(reloadButton, title: "↻", action: #selector(reloadTapped), horizontalInset: 14)
-        configureButton(bookmarkStarButton, title: "☆", action: #selector(toggleBookmarkTapped), horizontalInset: 14)
-        configureButton(videoButton, title: "📺 Vídeo", action: #selector(playDetectedVideoTapped), horizontalInset: 14)
+        configureButton(reloadButton, title: "↻", action: #selector(reloadTapped), horizontalInset: 12)
+        configureButton(bookmarkStarButton, title: "☆", action: #selector(toggleBookmarkTapped), horizontalInset: 12)
+        configureButton(videoButton, title: "📺 Vídeo", action: #selector(playDetectedVideoTapped), horizontalInset: 12)
         videoButton.isHidden = true
 
-        configureButton(tabsButton, title: "❏ 1", action: #selector(tabsTapped), horizontalInset: 14)
+        configureButton(modeButton, title: "↕ Scroll", action: #selector(toolbarModeTapped), horizontalInset: 12)
+        configureButton(tabsButton, title: "❏ 1", action: #selector(tabsTapped), horizontalInset: 12)
         configureButton(moreButton, title: "⋯ Menú", action: #selector(moreTapped), horizontalInset: 14)
-        configureButton(hideToolbarButton, title: "Listo", action: #selector(hideToolbarTapped), horizontalInset: 16)
+        configureButton(hideToolbarButton, title: "Listo", action: #selector(hideToolbarTapped), horizontalInset: 14)
 
         [
             backButton, forwardButton, homeButton,
             urlButton,
             zoomOutButton, zoomLevelButton, zoomInButton,
             reloadButton, bookmarkStarButton, videoButton,
-            tabsButton, moreButton, hideToolbarButton
+            modeButton, tabsButton, moreButton, hideToolbarButton
         ].forEach { toolbarStack.addArrangedSubview($0) }
     }
 
@@ -263,9 +263,13 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         coordinator.addCoordinatedAnimations({
             if let prev = context.previouslyFocusedView as? UIButton, prev.isDescendant(of: self.toolbarContainer) {
                 prev.transform = .identity
-                prev.backgroundColor = (prev == self.urlButton)
-                    ? UIColor.systemBlue.withAlphaComponent(0.55)
-                    : UIColor.white.withAlphaComponent(0.14)
+                if prev == self.urlButton {
+                    prev.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.55)
+                } else if prev == self.modeButton && self.cursorView.mode == .scroll {
+                    prev.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.55)
+                } else {
+                    prev.backgroundColor = UIColor.white.withAlphaComponent(0.14)
+                }
                 prev.setTitleColor(.white, for: .normal)
             }
             if let next = context.nextFocusedView as? UIButton, next.isDescendant(of: self.toolbarContainer) {
@@ -371,7 +375,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             showToast("WebApp: \(autoApp.title) (Mantén OK o Menú para opciones)", duration: 3.0)
         } else {
             openTab(url: homeSearchURL, webApp: nil, switchToIt: true)
-            showToast("Arriba: Buscar/Menú · Mantén OK: Menú rápido · Play: Cursor/Scroll", duration: 3.5)
+            showToast("Arriba del todo: Barra Safari · Mantén OK: Menú rápido · Play: Cursor/Scroll", duration: 3.5)
         }
     }
 
@@ -415,9 +419,9 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     private func switchToTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
+        activeTabIndex = index
         isWebInputFocused = false
         cachedCursorOverInnerScroll = false
-        cachedPageCanScrollUp = false
 
         for (i, tab) in tabs.enumerated() {
             tab.engine.webView.isHidden = (i != index)
@@ -474,7 +478,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         lastFailedURLByTab.removeValue(forKey: tab.id)
         isWebInputFocused = false
         cachedCursorOverInnerScroll = false
-        cachedPageCanScrollUp = false
         tab.engine.load(url)
         if tab === activeTab {
             updateToolbarState()
@@ -635,6 +638,13 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         let isLoading = currentEngine?.isLoading ?? activeTab?.isLoading ?? false
         reloadButton.setTitle(isLoading ? "✕" : "↻", for: .normal)
         tabsButton.setTitle("❏ \(tabs.count)", for: .normal)
+        let isScrollMode = (cursorView.mode == .scroll)
+        modeButton.setTitle(isScrollMode ? "🎯 Cursor" : "↕ Scroll", for: .normal)
+        if !modeButton.isFocused {
+            modeButton.backgroundColor = isScrollMode
+                ? UIColor.systemGreen.withAlphaComponent(0.55)
+                : UIColor.white.withAlphaComponent(0.14)
+        }
         let zoomPct = Int(round((activeTab?.zoom ?? BrowserStore.shared.pageZoom) * 100))
         zoomLevelButton.setTitle("\(zoomPct)%", for: .normal)
         videoButton.isHidden = (activeTab?.detectedVideoURL == nil)
@@ -1340,6 +1350,11 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         setToolbarVisible(false)
     }
 
+    @objc private func toolbarModeTapped() {
+        modeTapped()
+        setToolbarVisible(false)
+    }
+
     // MARK: - Native Video Handoff
 
     @objc private func playDetectedVideoTapped() {
@@ -1508,7 +1523,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         }
 
         if toolbarVisible {
-            if presses.contains(where: { $0.type == .menu || $0.type == .playPause }) {
+            if presses.contains(where: { $0.type == .menu || $0.type == .playPause || $0.type == .downArrow }) {
                 return
             }
             scheduleToolbarAutoHide()
@@ -1529,7 +1544,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         }
 
         if toolbarVisible {
-            if presses.contains(where: { $0.type == .menu || $0.type == .playPause }) {
+            if presses.contains(where: { $0.type == .menu || $0.type == .playPause || $0.type == .downArrow }) {
                 setToolbarVisible(false)
                 return
             }
@@ -1557,32 +1572,13 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         let nextY = max(8, min(bounds.height - 8, cursorView.center.y + delta.y))
         cursorView.center = CGPoint(x: nextX, y: nextY)
 
+        // Reaching the very top edge opens the Safari bar immediately from any scroll position
+        // without forcing the user to scroll the webpage all the way back to the top.
         let now = CACurrentMediaTime()
-        let scrollView = currentEngine?.scrollView
-        let topInset = scrollView?.adjustedContentInset.top ?? 0
-        let currentOffsetY = (scrollView?.contentOffset.y ?? 0) + topInset
-        let isAtTop = (currentOffsetY <= 6) && !cachedPageCanScrollUp
-
-        if !isAtTop {
-            lastScrolledDownTime = now
-        }
-
-        // Top edge:
-        // - If the page is scrolled down, entering the top band gently scrolls the page back up.
-        // - Once already at the top of the page, pushing against the top edge reveals the big Safari bar.
-        let topEdgeTriggerY: CGFloat = 18
-        let topScrollZoneY: CGFloat = 125
-        if !isAtTop && nextY <= topScrollZoneY && delta.y < 0 {
-            let t = min(1.0, (topScrollZoneY - nextY) / topScrollZoneY)
-            let curve: CGFloat = 0.22 + 0.78 * (t * t)
-            let step = max(-10.5, min(-1.6, delta.y * 0.90 * curve))
-            scrollWebView(by: CGPoint(x: 0, y: step))
-        } else if isAtTop,
-                  nextY <= topEdgeTriggerY,
-                  delta.y < -1.0,
-                  activeTab?.isAppMode != true,
-                  now >= suppressTopEdgeToolbarUntil,
-                  (now - lastScrolledDownTime) >= 0.25 {
+        if nextY <= 20,
+           delta.y < -0.5,
+           activeTab?.isAppMode != true,
+           now >= suppressTopEdgeToolbarUntil {
             setToolbarVisible(true)
             return
         }
@@ -1689,7 +1685,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             var link = tvClosest(el, 'a[href]');
             var clickable = link || tvClosest(el, 'a, button, select, label, summary, details, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [onclick], [tabindex]');
             var hasInnerScroll = false;
-            var canScrollUp = (window.scrollY || document.documentElement.scrollTop || 0) > 4;
             var cur = el;
             for (var i = 0; cur && cur !== doc.body && cur !== doc.documentElement; i++) {
                 try {
@@ -1701,7 +1696,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                     var canX = (st.overflowX === 'auto' || st.overflowX === 'scroll') && cur.scrollWidth > cur.clientWidth + 2;
                     if (canY || canX) {
                         hasInnerScroll = true;
-                        if (canY && cur.scrollTop > 4) canScrollUp = true;
                     }
                 } catch (e) {}
                 cur = cur.parentElement;
@@ -1714,8 +1708,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             return JSON.stringify({
                 hint: isText ? 'text' : (clickable ? 'clickable' : 'normal'),
                 href: href,
-                hasInnerScroll: hasInnerScroll,
-                canScrollUp: canScrollUp
+                hasInnerScroll: hasInnerScroll
             });
         })();
         """
@@ -1730,10 +1723,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             let hintStr = obj["hint"] as? String ?? "normal"
             let hint: CursorVisualHint = hintStr == "text" ? .textInput : (hintStr == "clickable" ? .clickable : .normal)
             let hasInner = obj["hasInnerScroll"] as? Bool ?? false
-            let canUp = obj["canScrollUp"] as? Bool ?? false
             DispatchQueue.main.async {
                 self.cachedCursorOverInnerScroll = hasInner
-                self.cachedPageCanScrollUp = canUp
                 self.cursorView.visualHint = hint
                 if let href = obj["href"] as? String, !href.isEmpty {
                     self.linkPreviewLabel.text = "  \(href)  "
@@ -1807,13 +1798,12 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                     if (canY) el.scrollTop += \(dy);
                     if (canX) el.scrollLeft += \(dx);
                     if (el.scrollTop !== beforeY || el.scrollLeft !== beforeX) {
-                        return JSON.stringify({ handled: true, canUp: el.scrollTop > 4 });
+                        return true;
                     }
                 }
                 el = el.parentElement;
             }
-            var docCanUp = (window.scrollY || document.documentElement.scrollTop || 0) > 4;
-            return JSON.stringify({ handled: false, canUp: docCanUp });
+            return false;
         })();
         """
 
@@ -1821,13 +1811,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.innerScrollInFlight = false
-                var handled = false
-                if let jsonStr = result as? String,
-                   let data = jsonStr.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    handled = (obj["handled"] as? Bool) ?? false
-                    self.cachedPageCanScrollUp = (obj["canUp"] as? Bool) ?? false
-                }
+                let handled = (result as? Bool) ?? false
                 if !handled {
                     if let scrollView = engine?.scrollView,
                        (scrollView.contentSize.height > scrollView.bounds.height + 2 ||
@@ -2525,7 +2509,6 @@ extension BrowserViewController: TVWebEngineDelegate {
         if tab === activeTab {
             isWebInputFocused = false
             cachedCursorOverInnerScroll = false
-            cachedPageCanScrollUp = false
             updateProgressUI()
             updateToolbarState()
         }
