@@ -82,7 +82,7 @@ final class BrowserStore {
     var pageZoom: Double {
         get {
             let val = UserDefaults.standard.double(forKey: zoomKey)
-            return val > 0 ? val : 1.25
+            return val > 0 ? val : 1.0
         }
         set {
             let clamped = max(0.75, min(2.2, newValue))

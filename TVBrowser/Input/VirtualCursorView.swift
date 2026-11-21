@@ -26,12 +26,15 @@ final class VirtualCursorView: UIView {
         }
     }
 
+    private let outerContrastHalo = CAShapeLayer()
     private let outerRing = CAShapeLayer()
+    private let innerDotHalo = CAShapeLayer()
     private let innerDot = CAShapeLayer()
+    private let textBeamHalo = CAShapeLayer()
     private let textBeam = CAShapeLayer()
 
     override init(frame: CGRect) {
-        super.init(frame: CGRect(x: 0, y: 0, width: 38, height: 38))
+        super.init(frame: CGRect(x: 0, y: 0, width: 48, height: 48))
         isUserInteractionEnabled = false
         backgroundColor = .clear
         setupLayers()
@@ -43,44 +46,67 @@ final class VirtualCursorView: UIView {
     }
 
     private func setupLayers() {
-        let ringRect = bounds.insetBy(dx: 3, dy: 3)
-        outerRing.path = UIBezierPath(ovalIn: ringRect).cgPath
+        let ringRect = bounds.insetBy(dx: 5, dy: 5)
+        let ringPath = UIBezierPath(ovalIn: ringRect).cgPath
+
+        // Thick dark halo ensures visibility on solid white pages like Google
+        outerContrastHalo.path = ringPath
+        outerContrastHalo.lineWidth = 6.5
+        outerContrastHalo.strokeColor = UIColor(red: 0.04, green: 0.07, blue: 0.14, alpha: 0.90).cgColor
+        outerContrastHalo.fillColor = UIColor.clear.cgColor
+        outerContrastHalo.shadowColor = UIColor.black.cgColor
+        outerContrastHalo.shadowOpacity = 0.65
+        outerContrastHalo.shadowRadius = 6.0
+        outerContrastHalo.shadowOffset = CGSize(width: 0, height: 2)
+        layer.addSublayer(outerContrastHalo)
+
+        outerRing.path = ringPath
         outerRing.lineWidth = 3.0
-        outerRing.shadowColor = UIColor.black.cgColor
-        outerRing.shadowOpacity = 0.7
-        outerRing.shadowRadius = 4.0
-        outerRing.shadowOffset = CGSize(width: 0, height: 2)
         layer.addSublayer(outerRing)
 
-        let dotRect = bounds.insetBy(dx: 13, dy: 13)
+        let dotHaloRect = bounds.insetBy(dx: 16, dy: 16)
+        innerDotHalo.path = UIBezierPath(ovalIn: dotHaloRect).cgPath
+        innerDotHalo.fillColor = UIColor(red: 0.04, green: 0.07, blue: 0.14, alpha: 0.92).cgColor
+        layer.addSublayer(innerDotHalo)
+
+        let dotRect = bounds.insetBy(dx: 18, dy: 18)
         innerDot.path = UIBezierPath(ovalIn: dotRect).cgPath
         layer.addSublayer(innerDot)
 
         let beamPath = UIBezierPath()
-        beamPath.move(to: CGPoint(x: bounds.midX, y: 7))
-        beamPath.addLine(to: CGPoint(x: bounds.midX, y: bounds.height - 7))
-        beamPath.move(to: CGPoint(x: bounds.midX - 5, y: 7))
-        beamPath.addLine(to: CGPoint(x: bounds.midX + 5, y: 7))
-        beamPath.move(to: CGPoint(x: bounds.midX - 5, y: bounds.height - 7))
-        beamPath.addLine(to: CGPoint(x: bounds.midX + 5, y: bounds.height - 7))
+        beamPath.move(to: CGPoint(x: bounds.midX, y: 11))
+        beamPath.addLine(to: CGPoint(x: bounds.midX, y: bounds.height - 11))
+        beamPath.move(to: CGPoint(x: bounds.midX - 6, y: 11))
+        beamPath.addLine(to: CGPoint(x: bounds.midX + 6, y: 11))
+        beamPath.move(to: CGPoint(x: bounds.midX - 6, y: bounds.height - 11))
+        beamPath.addLine(to: CGPoint(x: bounds.midX + 6, y: bounds.height - 11))
+
+        textBeamHalo.path = beamPath.cgPath
+        textBeamHalo.lineWidth = 5.5
+        textBeamHalo.lineCap = .round
+        textBeamHalo.strokeColor = UIColor(red: 0.04, green: 0.07, blue: 0.14, alpha: 0.95).cgColor
+        textBeamHalo.fillColor = UIColor.clear.cgColor
+        textBeamHalo.isHidden = true
+        layer.addSublayer(textBeamHalo)
+
         textBeam.path = beamPath.cgPath
         textBeam.lineWidth = 2.6
         textBeam.lineCap = .round
         textBeam.strokeColor = UIColor.white.cgColor
         textBeam.fillColor = UIColor.clear.cgColor
-        textBeam.shadowColor = UIColor.black.cgColor
-        textBeam.shadowOpacity = 0.8
-        textBeam.shadowRadius = 2.0
         textBeam.isHidden = true
         layer.addSublayer(textBeam)
     }
 
     private func updateAppearance() {
         if mode == .scroll {
+            outerContrastHalo.isHidden = false
             outerRing.isHidden = false
+            innerDotHalo.isHidden = false
             innerDot.isHidden = false
+            textBeamHalo.isHidden = true
             textBeam.isHidden = true
-            outerRing.fillColor = UIColor.systemGreen.withAlphaComponent(0.26).cgColor
+            outerRing.fillColor = UIColor.systemGreen.withAlphaComponent(0.32).cgColor
             outerRing.strokeColor = UIColor.systemGreen.cgColor
             innerDot.fillColor = UIColor.white.cgColor
             UIView.animate(withDuration: 0.12) { self.transform = .identity }
@@ -89,33 +115,47 @@ final class VirtualCursorView: UIView {
 
         switch visualHint {
         case .normal:
+            outerContrastHalo.isHidden = false
             outerRing.isHidden = false
+            innerDotHalo.isHidden = false
             innerDot.isHidden = false
+            textBeamHalo.isHidden = true
             textBeam.isHidden = true
-            outerRing.fillColor = UIColor.white.withAlphaComponent(0.26).cgColor
+            outerRing.fillColor = UIColor(red: 0.10, green: 0.45, blue: 0.98, alpha: 0.24).cgColor
             outerRing.strokeColor = UIColor.white.cgColor
-            innerDot.fillColor = UIColor.systemBlue.cgColor
+            innerDot.fillColor = UIColor(red: 0.15, green: 0.62, blue: 1.0, alpha: 1.0).cgColor
             UIView.animate(withDuration: 0.12) { self.transform = .identity }
+
         case .clickable:
+            outerContrastHalo.isHidden = false
             outerRing.isHidden = false
+            innerDotHalo.isHidden = false
             innerDot.isHidden = false
+            textBeamHalo.isHidden = true
             textBeam.isHidden = true
-            outerRing.fillColor = UIColor.systemBlue.withAlphaComponent(0.32).cgColor
-            outerRing.strokeColor = UIColor.white.cgColor
+            outerRing.fillColor = UIColor.systemBlue.withAlphaComponent(0.42).cgColor
+            outerRing.strokeColor = UIColor(red: 0.35, green: 0.82, blue: 1.0, alpha: 1.0).cgColor
             innerDot.fillColor = UIColor.white.cgColor
             UIView.animate(withDuration: 0.12) {
-                self.transform = CGAffineTransform(scaleX: 1.18, y: 1.18)
+                self.transform = CGAffineTransform(scaleX: 1.16, y: 1.16)
             }
+
         case .textInput:
-            outerRing.isHidden = true
+            // Keep outer ring visible so the cursor never vanishes inside white text inputs
+            outerContrastHalo.isHidden = false
+            outerRing.isHidden = false
+            innerDotHalo.isHidden = true
             innerDot.isHidden = true
+            textBeamHalo.isHidden = false
             textBeam.isHidden = false
+            outerRing.fillColor = UIColor(red: 0.08, green: 0.12, blue: 0.22, alpha: 0.22).cgColor
+            outerRing.strokeColor = UIColor(red: 0.35, green: 0.82, blue: 1.0, alpha: 1.0).cgColor
             UIView.animate(withDuration: 0.12) { self.transform = .identity }
         }
     }
 
     func animateClick() {
-        let baseScale: CGFloat = (mode == .pointer && visualHint == .clickable) ? 1.18 : 1.0
+        let baseScale: CGFloat = (mode == .pointer && visualHint == .clickable) ? 1.16 : 1.0
         UIView.animate(withDuration: 0.08, animations: {
             self.transform = CGAffineTransform(scaleX: 0.72, y: 0.72)
         }) { _ in

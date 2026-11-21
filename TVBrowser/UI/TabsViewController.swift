@@ -6,10 +6,14 @@ final class TabsViewController: UIViewController {
     var onSelectTab: ((Int) -> Void)?
     var onCloseTab: ((Int) -> Void)?
     var onNewTab: (() -> Void)?
+    var onDismiss: (() -> Void)?
 
     private var collectionView: UICollectionView!
-    private let newTabButton = UIButton(type: .system)
-    private let closeViewButton = UIButton(type: .system)
+    private let titleLabel = UILabel()
+    private let newTabButton = UIButton(type: .custom)
+    private let closeViewButton = UIButton(type: .custom)
+    private let topFocusGuide = UIFocusGuide()
+    private let bottomFocusGuide = UIFocusGuide()
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         [collectionView]
@@ -20,10 +24,14 @@ final class TabsViewController: UIViewController {
         view.backgroundColor = UIColor(red: 0.05, green: 0.07, blue: 0.11, alpha: 0.98)
         setupHeader()
         setupCollectionView()
+        setupFocusGuides()
+
+        let menuTap = UITapGestureRecognizer(target: self, action: #selector(closeTapped))
+        menuTap.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        view.addGestureRecognizer(menuTap)
     }
 
     private func setupHeader() {
-        let titleLabel = UILabel()
         titleLabel.text = "Pestañas abiertas (\(tabs.count))"
         titleLabel.font = .systemFont(ofSize: 36, weight: .bold)
         titleLabel.textColor = .white
@@ -51,7 +59,7 @@ final class TabsViewController: UIViewController {
         view.addSubview(closeViewButton)
 
         let hintLabel = UILabel()
-        hintLabel.text = "Selecciona una pestaña para cambiar · Mantén pulsado Seleccionar para cerrarla"
+        hintLabel.text = "Selecciona una pestaña para cambiar · Pulsa Play/Pausa o mantén Seleccionar para cerrarla"
         hintLabel.font = .systemFont(ofSize: 20, weight: .regular)
         hintLabel.textColor = UIColor.white.withAlphaComponent(0.6)
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -85,6 +93,7 @@ final class TabsViewController: UIViewController {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = .clear
+        collectionView.remembersLastFocusedIndexPath = true
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(TabCardCell.self, forCellWithReuseIdentifier: TabCardCell.reuseId)
@@ -93,12 +102,37 @@ final class TabsViewController: UIViewController {
         longPress.allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
         collectionView.addGestureRecognizer(longPress)
 
+        let playTap = UITapGestureRecognizer(target: self, action: #selector(handlePlayPauseOnCell(_:)))
+        playTap.allowedPressTypes = [NSNumber(value: UIPress.PressType.playPause.rawValue)]
+        collectionView.addGestureRecognizer(playTap)
+
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
             collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 130),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    private func setupFocusGuides() {
+        // Bridges UP from left-side tab cards directly to + Nueva pestaña / Cerrar
+        view.addLayoutGuide(topFocusGuide)
+        topFocusGuide.preferredFocusEnvironments = [newTabButton, closeViewButton]
+        NSLayoutConstraint.activate([
+            topFocusGuide.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            topFocusGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topFocusGuide.trailingAnchor.constraint(equalTo: newTabButton.leadingAnchor),
+            topFocusGuide.bottomAnchor.constraint(equalTo: collectionView.topAnchor)
+        ])
+
+        view.addLayoutGuide(bottomFocusGuide)
+        bottomFocusGuide.preferredFocusEnvironments = [collectionView]
+        NSLayoutConstraint.activate([
+            bottomFocusGuide.topAnchor.constraint(equalTo: newTabButton.bottomAnchor),
+            bottomFocusGuide.leadingAnchor.constraint(equalTo: newTabButton.leadingAnchor),
+            bottomFocusGuide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomFocusGuide.bottomAnchor.constraint(equalTo: collectionView.topAnchor)
         ])
     }
 
@@ -126,7 +160,17 @@ final class TabsViewController: UIViewController {
     }
 
     @objc private func closeTapped() {
-        dismiss(animated: true)
+        dismiss(animated: true) { [weak self] in
+            self?.onDismiss?()
+        }
+    }
+
+    @objc private func handlePlayPauseOnCell(_ gesture: UITapGestureRecognizer) {
+        guard let cell = view.window?.windowScene?.focusSystem?.focusedItem as? UICollectionViewCell,
+              let indexPath = collectionView.indexPath(for: cell),
+              tabs.indices.contains(indexPath.item),
+              tabs.count > 1 else { return }
+        closeTabAt(indexPath.item)
     }
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -144,14 +188,20 @@ final class TabsViewController: UIViewController {
         })
         if tabs.count > 1 {
             alert.addAction(UIAlertAction(title: "Cerrar pestaña", style: .destructive) { [weak self] _ in
-                guard let self = self else { return }
-                self.onCloseTab?(indexPath.item)
-                self.tabs.remove(at: indexPath.item)
-                self.collectionView.reloadData()
+                self?.closeTabAt(indexPath.item)
             })
         }
         alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
         present(alert, animated: true)
+    }
+
+    private func closeTabAt(_ index: Int) {
+        guard tabs.indices.contains(index), tabs.count > 1 else { return }
+        onCloseTab?(index)
+        tabs.remove(at: index)
+        if activeTabIndex >= tabs.count { activeTabIndex = max(0, tabs.count - 1) }
+        titleLabel.text = "Pestañas abiertas (\(tabs.count))"
+        collectionView.reloadData()
     }
 }
 
@@ -252,12 +302,16 @@ private final class TabCardCell: UICollectionViewCell {
         coordinator.addCoordinatedAnimations({
             if self.isFocused {
                 self.card.transform = CGAffineTransform(scaleX: 1.06, y: 1.06)
-                self.card.backgroundColor = UIColor.white.withAlphaComponent(0.22)
-                self.card.layer.borderColor = UIColor.white.cgColor
+                self.card.backgroundColor = .white
+                self.card.layer.borderColor = UIColor.systemBlue.cgColor
+                self.titleLabel.textColor = .black
+                self.urlLabel.textColor = UIColor.black.withAlphaComponent(0.65)
             } else {
                 self.card.transform = .identity
                 self.card.backgroundColor = UIColor.white.withAlphaComponent(0.11)
                 self.card.layer.borderColor = UIColor.clear.cgColor
+                self.titleLabel.textColor = .white
+                self.urlLabel.textColor = UIColor.white.withAlphaComponent(0.65)
             }
         }, completion: nil)
     }

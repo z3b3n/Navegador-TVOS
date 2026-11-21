@@ -2,7 +2,11 @@ import UIKit
 import AVKit
 import AVFoundation
 
-final class BrowserViewController: UIViewController {
+private final class FocusSinkView: UIView {
+    override var canBecomeFocused: Bool { true }
+}
+
+final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate {
     private var tabs: [BrowserTab] = []
     private var activeTabIndex: Int = 0
     private var activeTab: BrowserTab? {
@@ -10,9 +14,11 @@ final class BrowserViewController: UIViewController {
     }
     private var currentEngine: TVWebEngine? { activeTab?.engine }
 
+    private let focusSinkView = FocusSinkView()
     private let webHostContainer = UIView()
     private let cursorView = VirtualCursorView()
     private let inputController = InputController()
+    private var panGesture: UIPanGestureRecognizer?
     private let remoteServer = LocalExportServer()
     private var remoteServerURL: String?
     private var remoteServerRunning = false
@@ -22,16 +28,16 @@ final class BrowserViewController: UIViewController {
     // Compact Safari-style Toolbar
     private let toolbarContainer = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private let toolbarStack = UIStackView()
-    private let backButton = UIButton(type: .system)
-    private let forwardButton = UIButton(type: .system)
-    private let homeButton = UIButton(type: .system)
-    private let urlButton = UIButton(type: .system)
-    private let reloadButton = UIButton(type: .system)
-    private let bookmarkStarButton = UIButton(type: .system)
-    private let videoButton = UIButton(type: .system)
-    private let tabsButton = UIButton(type: .system)
-    private let moreButton = UIButton(type: .system)
-    private let hideToolbarButton = UIButton(type: .system)
+    private let backButton = UIButton(type: .custom)
+    private let forwardButton = UIButton(type: .custom)
+    private let homeButton = UIButton(type: .custom)
+    private let urlButton = UIButton(type: .custom)
+    private let reloadButton = UIButton(type: .custom)
+    private let bookmarkStarButton = UIButton(type: .custom)
+    private let videoButton = UIButton(type: .custom)
+    private let tabsButton = UIButton(type: .custom)
+    private let moreButton = UIButton(type: .custom)
+    private let hideToolbarButton = UIButton(type: .custom)
 
     private let progressBar = UIProgressView(progressViewStyle: .default)
     private let linkPreviewLabel = UILabel()
@@ -39,6 +45,7 @@ final class BrowserViewController: UIViewController {
     private var toastHideWorkItem: DispatchWorkItem?
 
     private var toolbarVisible = false
+    private var hasPositionedInitialCursor = false
     private var lastPanPoint: CGPoint = .zero
     private var panStartPoint: CGPoint = .zero
     private var isWebInputFocused = false
@@ -56,7 +63,7 @@ final class BrowserViewController: UIViewController {
         if toolbarVisible {
             return [urlButton]
         }
-        return [view]
+        return [focusSinkView]
     }
 
     override var keyCommands: [UIKeyCommand]? {
@@ -78,12 +85,15 @@ final class BrowserViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
 
+        setupFocusSink()
         setupWebHost()
         setupToolbar()
         setupProgressAndOverlays()
         setupCursor()
         setupGestures()
         setupRemoteServer()
+
+        view.layoutIfNeeded()
 
         inputController.delegate = self
         inputController.start()
@@ -93,12 +103,63 @@ final class BrowserViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        becomeFirstResponder()
+        restoreBrowserFocus()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let hostBounds = webHostContainer.bounds
+        if !hostBounds.isEmpty {
+            for tab in tabs where tab.engine.webView.frame != hostBounds {
+                tab.engine.webView.frame = hostBounds
+            }
+        }
+        if view.bounds.width > 100 && view.bounds.height > 100 {
+            if !hasPositionedInitialCursor {
+                cursorView.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+                hasPositionedInitialCursor = true
+            } else {
+                let cx = max(8, min(view.bounds.width - 8, cursorView.center.x))
+                let cy = max(8, min(view.bounds.height - 8, cursorView.center.y))
+                cursorView.center = CGPoint(x: cx, y: cy)
+            }
+        }
+        if !toolbarVisible {
+            view.bringSubviewToFront(cursorView)
+        }
     }
 
     deinit {
         inputController.stop()
         remoteServer.stop()
+    }
+
+    private func setupFocusSink() {
+        focusSinkView.translatesAutoresizingMaskIntoConstraints = false
+        focusSinkView.backgroundColor = .clear
+        view.addSubview(focusSinkView)
+        NSLayoutConstraint.activate([
+            focusSinkView.topAnchor.constraint(equalTo: view.topAnchor),
+            focusSinkView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            focusSinkView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            focusSinkView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
+
+    private func restoreBrowserFocus() {
+        let apply = { [weak self] in
+            guard let self = self else { return }
+            self.focusSinkView.isHidden = self.toolbarVisible
+            self.panGesture?.isEnabled = !self.toolbarVisible && self.presentedViewController == nil
+            self.becomeFirstResponder()
+            self.setNeedsFocusUpdate()
+            self.updateFocusIfNeeded()
+            if !self.toolbarVisible {
+                self.view.bringSubviewToFront(self.cursorView)
+            }
+        }
+        apply()
+        DispatchQueue.main.async(execute: apply)
     }
 
     private func setupWebHost() {
@@ -134,20 +195,20 @@ final class BrowserViewController: UIViewController {
             toolbarContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 14),
             toolbarContainer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 32),
             toolbarContainer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -32),
-            toolbarContainer.heightAnchor.constraint(equalToConstant: 90),
+            toolbarContainer.heightAnchor.constraint(equalToConstant: 98),
 
-            toolbarStack.topAnchor.constraint(equalTo: toolbarContainer.contentView.topAnchor, constant: 10),
-            toolbarStack.bottomAnchor.constraint(equalTo: toolbarContainer.contentView.bottomAnchor, constant: -10),
-            toolbarStack.leadingAnchor.constraint(equalTo: toolbarContainer.contentView.leadingAnchor, constant: 16),
-            toolbarStack.trailingAnchor.constraint(equalTo: toolbarContainer.contentView.trailingAnchor, constant: -16)
+            toolbarStack.topAnchor.constraint(equalTo: toolbarContainer.contentView.topAnchor, constant: 12),
+            toolbarStack.bottomAnchor.constraint(equalTo: toolbarContainer.contentView.bottomAnchor, constant: -12),
+            toolbarStack.leadingAnchor.constraint(equalTo: toolbarContainer.contentView.leadingAnchor, constant: 18),
+            toolbarStack.trailingAnchor.constraint(equalTo: toolbarContainer.contentView.trailingAnchor, constant: -18)
         ])
 
         configureButton(backButton, title: "◀", action: #selector(backTapped))
         configureButton(forwardButton, title: "▶", action: #selector(forwardTapped))
-        configureButton(homeButton, title: "⌂", action: #selector(homeTapped))
+        configureButton(homeButton, title: "⌂ Inicio", action: #selector(homeTapped))
 
         configureButton(urlButton, title: "🔍 Buscar o escribir URL", action: #selector(urlTapped), accent: true)
-        urlButton.contentHorizontalAlignment = .left
+        urlButton.contentHorizontalAlignment = .center
         urlButton.titleLabel?.lineBreakMode = .byTruncatingMiddle
         urlButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
         urlButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -159,7 +220,7 @@ final class BrowserViewController: UIViewController {
         videoButton.isHidden = true
 
         configureButton(tabsButton, title: "❏ 1", action: #selector(tabsTapped))
-        configureButton(moreButton, title: "⋯", action: #selector(moreTapped))
+        configureButton(moreButton, title: "⋯ Menú", action: #selector(moreTapped))
         configureButton(hideToolbarButton, title: "Listo", action: #selector(hideToolbarTapped))
 
         [
@@ -245,14 +306,24 @@ final class BrowserViewController: UIViewController {
     }
 
     private func setupCursor() {
-        cursorView.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        let fallbackBounds = view.bounds.isEmpty ? UIScreen.main.bounds : view.bounds
+        cursorView.center = CGPoint(x: fallbackBounds.midX, y: fallbackBounds.midY)
         view.addSubview(cursorView)
     }
 
     private func setupGestures() {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        pan.cancelsTouchesInView = false
+        pan.delaysTouchesBegan = false
+        pan.delaysTouchesEnded = false
+        pan.delegate = self
         view.addGestureRecognizer(pan)
+        panGesture = pan
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        !toolbarVisible && presentedViewController == nil
     }
 
     private func showToast(_ text: String, duration: TimeInterval = 1.6) {
@@ -276,9 +347,10 @@ final class BrowserViewController: UIViewController {
         if let autoApp = BrowserStore.shared.autoLaunchWebApp,
            let url = URL(string: autoApp.urlString) {
             openTab(url: url, webApp: autoApp, switchToIt: true)
-            showToast("WebApp: \(autoApp.title) (Mantén Menú para opciones)", duration: 2.6)
+            showToast("WebApp: \(autoApp.title) (Mantén Menú para opciones)", duration: 3.0)
         } else {
             openTab(url: homeSearchURL, webApp: nil, switchToIt: true)
+            showToast("Play/Pausa: Cursor ↔ Scroll · Mantén Menú o Play: Barra Safari", duration: 3.2)
         }
     }
 
@@ -289,15 +361,18 @@ final class BrowserViewController: UIViewController {
         webApp: WebAppItem? = nil,
         switchToIt: Bool = true
     ) -> BrowserTab {
+        let initialFrame = webHostContainer.bounds.isEmpty
+            ? (view.bounds.isEmpty ? UIScreen.main.bounds : view.bounds)
+            : webHostContainer.bounds
         let tab = BrowserTab(
-            frame: webHostContainer.bounds,
+            frame: initialFrame,
             runtimeConfiguration: runtimeConfiguration,
             webApp: webApp,
             showingStartPage: false
         )
         tab.engine.delegate = self
         tab.engine.webView.isUserInteractionEnabled = false
-        tab.engine.webView.frame = webHostContainer.bounds
+        tab.engine.webView.frame = initialFrame
         tab.engine.webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         tab.engine.webView.isHidden = true
         webHostContainer.addSubview(tab.engine.webView)
@@ -398,14 +473,30 @@ final class BrowserViewController: UIViewController {
         guard let targetTab = tab ?? activeTab else { return }
         let zoom = targetTab.zoom
         if targetTab.engine.applyNativePageZoom(CGFloat(zoom)) { return }
-        let js = """
-        (function() {
-            if (document.documentElement) {
-                document.documentElement.style.zoom = '\(zoom)';
-                document.documentElement.style.webkitTextSizeAdjust = '\(Int(zoom * 100))%';
-            }
-        })();
-        """
+        let isDefaultZoom = abs(zoom - 1.0) < 0.01
+        let js: String
+        if isDefaultZoom {
+            js = """
+            (function() {
+                if (document.documentElement) {
+                    document.documentElement.style.zoom = '';
+                    document.documentElement.style.width = '';
+                    document.documentElement.style.webkitTextSizeAdjust = '';
+                }
+            })();
+            """
+        } else {
+            let widthPct = 100.0 / zoom
+            js = """
+            (function() {
+                if (document.documentElement) {
+                    document.documentElement.style.zoom = '\(zoom)';
+                    document.documentElement.style.width = '\(widthPct)%';
+                    document.documentElement.style.webkitTextSizeAdjust = '\(Int(zoom * 100))%';
+                }
+            })();
+            """
+        }
         targetTab.engine.evaluateJavaScript(js, completion: nil)
     }
 
@@ -413,10 +504,13 @@ final class BrowserViewController: UIViewController {
         guard toolbarVisible != visible else { return }
         toolbarVisible = visible
         cursorView.isHidden = visible
+        panGesture?.isEnabled = !visible && presentedViewController == nil
+        focusSinkView.isHidden = visible
         if visible {
             linkPreviewLabel.isHidden = true
             updateToolbarState()
             toolbarContainer.isHidden = false
+            view.bringSubviewToFront(toolbarContainer)
             UIView.animate(withDuration: 0.18) {
                 self.toolbarContainer.alpha = 1
             } completion: { _ in
@@ -428,9 +522,7 @@ final class BrowserViewController: UIViewController {
                 self.toolbarContainer.alpha = 0
             }) { _ in
                 self.toolbarContainer.isHidden = true
-                self.becomeFirstResponder()
-                self.setNeedsFocusUpdate()
-                self.updateFocusIfNeeded()
+                self.restoreBrowserFocus()
             }
         }
     }
@@ -597,8 +689,11 @@ final class BrowserViewController: UIViewController {
             guard let self = self else { return }
             self.setToolbarVisible(false)
             self.load(url: self.homeSearchURL)
+            self.restoreBrowserFocus()
         })
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
         present(alert, animated: true)
     }
 
@@ -621,10 +716,13 @@ final class BrowserViewController: UIViewController {
             guard let self = self, let text = alert?.textFields?.first?.text else { return }
             self.setToolbarVisible(false)
             self.openInputURL(text)
+            self.restoreBrowserFocus()
         }
         alert.addAction(goAction)
         alert.preferredAction = goAction
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
         present(alert, animated: true)
     }
 
@@ -649,6 +747,7 @@ final class BrowserViewController: UIViewController {
         vc.onSelectTab = { [weak self] idx in
             self?.setToolbarVisible(false)
             self?.switchToTab(at: idx)
+            self?.restoreBrowserFocus()
         }
         vc.onCloseTab = { [weak self] idx in
             self?.closeTab(at: idx)
@@ -657,13 +756,15 @@ final class BrowserViewController: UIViewController {
             self?.setToolbarVisible(false)
             self?.presentStartPage(createNewTab: true)
         }
+        vc.onDismiss = { [weak self] in
+            self?.restoreBrowserFocus()
+        }
         vc.modalPresentationStyle = .fullScreen
         present(vc, animated: true)
     }
 
     @objc private func moreTapped() {
         guard let tab = activeTab else { return }
-        let modeTitle = cursorView.mode == .pointer ? "Modo actual: Cursor → Cambiar a Scroll" : "Modo actual: Scroll → Cambiar a Cursor"
         let zoomPct = Int(round(tab.zoom * 100))
         let uaName: String = {
             switch tab.userAgentMode {
@@ -673,59 +774,177 @@ final class BrowserViewController: UIViewController {
             @unknown default: return "Escritorio Mac"
             }
         }()
-        let adState = tab.adBlockEnabled ? "ON" : "OFF"
-        let remoteState = remoteServerRunning ? "Activo (\(connectedRemoteClients))" : "Iniciar"
+        let remoteSubtitle = remoteServerRunning ? "Activo (\(connectedRemoteClients) conectados)" : "Ratón y teclado Wi-Fi"
 
-        let alert = UIAlertController(title: "Opciones de TVBrowser", message: "Zoom \(zoomPct)% · \(uaName)", preferredStyle: .alert)
+        let menuVC = BrowserMenuViewController()
+        menuVC.modalPresentationStyle = .fullScreen
+        menuVC.items = [
+            BrowserMenuActionItem(
+                id: "mode",
+                icon: cursorView.mode == .pointer ? "⌖" : "↕",
+                title: cursorView.mode == .pointer ? "Modo: Cursor" : "Modo: Scroll",
+                subtitle: "Cambiar a \(cursorView.mode == .pointer ? "Scroll" : "Cursor")",
+                accentColor: cursorView.mode == .pointer ? .systemBlue : .systemGreen
+            ),
+            BrowserMenuActionItem(
+                id: "home",
+                icon: "⌂",
+                title: "Página de Inicio",
+                subtitle: "WebApps, Favoritos e Historial",
+                accentColor: .systemIndigo
+            ),
+            BrowserMenuActionItem(
+                id: "tabs",
+                icon: "❏",
+                title: "Pestañas (\(tabs.count))",
+                subtitle: "Ver o abrir nueva pestaña",
+                accentColor: .systemTeal
+            ),
+            BrowserMenuActionItem(
+                id: "remote",
+                icon: "📱",
+                title: "Control Remoto QR",
+                subtitle: remoteSubtitle,
+                accentColor: UIColor(red: 0.08, green: 0.68, blue: 0.90, alpha: 1.0)
+            ),
+            BrowserMenuActionItem(
+                id: "zoomIn",
+                icon: "A+",
+                title: "Aumentar Zoom",
+                subtitle: "Actual: \(zoomPct)% → \(min(220, zoomPct + 15))%",
+                accentColor: .systemBlue
+            ),
+            BrowserMenuActionItem(
+                id: "zoomOut",
+                icon: "A-",
+                title: "Reducir Zoom",
+                subtitle: "Actual: \(zoomPct)% → \(max(75, zoomPct - 15))%",
+                accentColor: .systemBlue
+            ),
+            BrowserMenuActionItem(
+                id: "zoomReset",
+                icon: "1:1",
+                title: "Zoom 100%",
+                subtitle: "Restablecer tamaño normal",
+                accentColor: .systemGray
+            ),
+            BrowserMenuActionItem(
+                id: "video",
+                icon: "▶",
+                title: "Reproducir Vídeo TV",
+                subtitle: "Abrir reproductor nativo",
+                accentColor: .systemPurple
+            ),
+            BrowserMenuActionItem(
+                id: "bookmarks",
+                icon: "★",
+                title: "Marcadores",
+                subtitle: "\(BrowserStore.shared.bookmarks.count) guardados",
+                accentColor: .systemOrange
+            ),
+            BrowserMenuActionItem(
+                id: "history",
+                icon: "🕒",
+                title: "Historial",
+                subtitle: "\(BrowserStore.shared.history.count) páginas",
+                accentColor: .systemTeal
+            ),
+            BrowserMenuActionItem(
+                id: "webapp",
+                icon: "⊞",
+                title: "Guardar WebApp",
+                subtitle: "Fijar en pantalla completa",
+                accentColor: .systemIndigo
+            ),
+            BrowserMenuActionItem(
+                id: "userAgent",
+                icon: "🖥",
+                title: "User-Agent",
+                subtitle: uaName,
+                accentColor: .systemGray
+            ),
+            BrowserMenuActionItem(
+                id: "adblock",
+                icon: "🛡",
+                title: "AdBlock: \(tab.adBlockEnabled ? "ON" : "OFF")",
+                subtitle: "Bloqueador de anuncios",
+                accentColor: tab.adBlockEnabled ? .systemGreen : .systemGray
+            ),
+            BrowserMenuActionItem(
+                id: "searchEngine",
+                icon: "🔍",
+                title: "Buscador",
+                subtitle: BrowserStore.shared.searchEngine.displayName,
+                accentColor: .systemBlue
+            ),
+            BrowserMenuActionItem(
+                id: "clearCache",
+                icon: "🗑",
+                title: "Borrar Caché",
+                subtitle: "Limpiar caché y cookies",
+                accentColor: .systemRed
+            )
+        ]
 
-        alert.addAction(UIAlertAction(title: modeTitle, style: .default) { [weak self] _ in
-            self?.modeTapped()
-        })
-        alert.addAction(UIAlertAction(title: "Zoom + (\(min(220, zoomPct + 15))%)", style: .default) { [weak self] _ in
-            self?.zoomInTapped()
-        })
-        alert.addAction(UIAlertAction(title: "Zoom - (\(max(75, zoomPct - 15))%)", style: .default) { [weak self] _ in
-            self?.zoomOutTapped()
-        })
-        alert.addAction(UIAlertAction(title: "Guardar como WebApp (Pantalla completa)", style: .default) { [weak self] _ in
-            self?.promptSaveCurrentAsWebApp()
-        })
-        alert.addAction(UIAlertAction(title: "Control Remoto (Ratón/Teclado/QR): \(remoteState)", style: .default) { [weak self] _ in
-            self?.exportTapped()
-        })
-        alert.addAction(UIAlertAction(title: "📺 Reproducir vídeo de esta web en TV", style: .default) { [weak self] _ in
-            self?.setToolbarVisible(false)
-            self?.detectAndPlayVideo()
-        })
-        alert.addAction(UIAlertAction(title: "Marcadores", style: .default) { [weak self] _ in
-            self?.bookmarksTapped()
-        })
-        alert.addAction(UIAlertAction(title: "Historial", style: .default) { [weak self] _ in
-            self?.historyTapped()
-        })
-        alert.addAction(UIAlertAction(title: "User-Agent: \(uaName)", style: .default) { [weak self] _ in
-            self?.presentUserAgentPicker()
-        })
-        alert.addAction(UIAlertAction(title: "AdBlock: \(adState)", style: .default) { [weak self] _ in
-            guard let self = self, let tab = self.activeTab else { return }
-            tab.adBlockEnabled.toggle()
-            if !tab.isAppMode { AdBlocker.shared.isEnabled = tab.adBlockEnabled }
-            self.applyAdBlockRuleList(to: tab)
-            tab.engine.reload()
-            self.setToolbarVisible(false)
-            self.showToast("AdBlock \(tab.adBlockEnabled ? "ON" : "OFF")")
-        })
-        alert.addAction(UIAlertAction(title: "Buscador: \(BrowserStore.shared.searchEngine.displayName)", style: .default) { [weak self] _ in
-            self?.presentSearchEnginePicker()
-        })
-        alert.addAction(UIAlertAction(title: "Borrar caché y cookies", style: .destructive) { [weak self] _ in
-            TVWebEngine.clearCacheAndCookies {
-                self?.showToast("Caché y cookies borradas")
-                self?.currentEngine?.reload()
+        menuVC.onSelectAction = { [weak self] actionId in
+            guard let self = self else { return }
+            switch actionId {
+            case "mode":
+                self.setToolbarVisible(false)
+                self.modeTapped()
+                self.restoreBrowserFocus()
+            case "home":
+                self.setToolbarVisible(false)
+                self.presentStartPage()
+            case "tabs":
+                self.tabsTapped()
+            case "remote":
+                self.exportTapped()
+            case "zoomIn":
+                self.zoomInTapped()
+                self.setToolbarVisible(false)
+            case "zoomOut":
+                self.zoomOutTapped()
+                self.setToolbarVisible(false)
+            case "zoomReset":
+                self.zoomResetTapped()
+                self.setToolbarVisible(false)
+            case "video":
+                self.setToolbarVisible(false)
+                self.detectAndPlayVideo()
+            case "bookmarks":
+                self.bookmarksTapped()
+            case "history":
+                self.historyTapped()
+            case "webapp":
+                self.promptSaveCurrentAsWebApp()
+            case "userAgent":
+                self.presentUserAgentPicker()
+            case "adblock":
+                guard let tab = self.activeTab else { return }
+                tab.adBlockEnabled.toggle()
+                if !tab.isAppMode { AdBlocker.shared.isEnabled = tab.adBlockEnabled }
+                self.applyAdBlockRuleList(to: tab)
+                tab.engine.reload()
+                self.setToolbarVisible(false)
+                self.showToast("AdBlock \(tab.adBlockEnabled ? "ON" : "OFF")")
+            case "searchEngine":
+                self.presentSearchEnginePicker()
+            case "clearCache":
+                self.setToolbarVisible(false)
+                TVWebEngine.clearCacheAndCookies {
+                    self.showToast("Caché y cookies borradas")
+                    self.currentEngine?.reload()
+                    self.restoreBrowserFocus()
+                }
+            default:
+                self.restoreBrowserFocus()
             }
-        })
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
-        present(alert, animated: true)
+        }
+        menuVC.onDismiss = { [weak self] in
+            self?.restoreBrowserFocus()
+        }
+        present(menuVC, animated: true)
     }
 
     private func presentUserAgentPicker() {
@@ -744,9 +963,12 @@ final class BrowserViewController: UIViewController {
                 tab.engine.reload()
                 self.setToolbarVisible(false)
                 self.showToast("User-Agent: \(title)")
+                self.restoreBrowserFocus()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
         present(alert, animated: true)
     }
 
@@ -757,9 +979,12 @@ final class BrowserViewController: UIViewController {
                 BrowserStore.shared.searchEngine = engine
                 self?.updateToolbarState()
                 self?.showToast("Buscador: \(engine.displayName)")
+                self?.restoreBrowserFocus()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
         present(alert, animated: true)
     }
 
@@ -780,13 +1005,17 @@ final class BrowserViewController: UIViewController {
 
         let saveNormal = UIAlertAction(title: "Guardar WebApp", style: .default) { [weak self, weak alert] _ in
             self?.finishSavingWebApp(title: alert?.textFields?.first?.text ?? defaultTitle, urlString: urlStr, autoLaunch: false)
+            self?.restoreBrowserFocus()
         }
         let saveAuto = UIAlertAction(title: "Guardar y abrir al iniciar TVBrowser", style: .default) { [weak self, weak alert] _ in
             self?.finishSavingWebApp(title: alert?.textFields?.first?.text ?? defaultTitle, urlString: urlStr, autoLaunch: true)
+            self?.restoreBrowserFocus()
         }
         alert.addAction(saveNormal)
         alert.addAction(saveAuto)
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
         present(alert, animated: true)
     }
 
@@ -813,7 +1042,7 @@ final class BrowserViewController: UIViewController {
         vc.onSearchTapped = { [weak self] in
             vc.dismiss(animated: true) {
                 if createNewTab {
-                    self?.openTab(url: nil, switchToIt: true)
+                    self?.openTab(url: self?.homeSearchURL, switchToIt: true)
                 }
                 self?.urlTapped()
             }
@@ -826,6 +1055,7 @@ final class BrowserViewController: UIViewController {
                     self?.activeTab?.webApp = nil
                     self?.load(url: url)
                 }
+                self?.restoreBrowserFocus()
             }
         }
         vc.onSelectWebApp = { [weak self] app in
@@ -837,39 +1067,53 @@ final class BrowserViewController: UIViewController {
                     self?.openTab(url: url, webApp: app, switchToIt: true)
                 }
                 self?.showToast("WebApp: \(app.title) (Mantén Menú para salir)")
+                self?.restoreBrowserFocus()
             }
         }
-        vc.onClose = {
-            vc.dismiss(animated: true)
+        vc.onClose = { [weak self] in
+            vc.dismiss(animated: true) {
+                self?.restoreBrowserFocus()
+            }
         }
         present(vc, animated: true)
     }
 
     @objc private func bookmarksTapped() {
-        let vc = BookmarksViewController(style: .grouped)
+        let vc = BookmarksViewController()
+        vc.modalPresentationStyle = .fullScreen
         vc.onSelectURL = { [weak self] url in
             self?.setToolbarVisible(false)
             self?.load(url: url)
+            self?.restoreBrowserFocus()
         }
         vc.onSaveAsWebApp = { [weak self] item in
             self?.promptSaveCurrentAsWebApp(prefillBookmark: item)
         }
-        present(UINavigationController(rootViewController: vc), animated: true)
+        vc.onDismiss = { [weak self] in
+            self?.restoreBrowserFocus()
+        }
+        present(vc, animated: true)
     }
 
     @objc private func historyTapped() {
-        let vc = HistoryViewController(style: .grouped)
+        let vc = HistoryViewController()
+        vc.modalPresentationStyle = .fullScreen
         vc.onSelectURL = { [weak self] url in
             self?.setToolbarVisible(false)
             self?.load(url: url)
+            self?.restoreBrowserFocus()
         }
-        present(UINavigationController(rootViewController: vc), animated: true)
+        vc.onDismiss = { [weak self] in
+            self?.restoreBrowserFocus()
+        }
+        present(vc, animated: true)
     }
 
     @objc private func exportTapped() {
         let presentExport = { [weak self] in
             guard let self = self else { return }
             let vc = ExportViewController()
+            vc.modalPresentationStyle = .fullScreen
             vc.server = self.remoteServer
             vc.serverURLString = self.remoteServerURL
             vc.connectedClientsCount = self.connectedRemoteClients
@@ -878,6 +1122,9 @@ final class BrowserViewController: UIViewController {
                 self?.remoteServerRunning = false
                 self?.remoteServerURL = nil
                 self?.showToast("Control remoto apagado")
+            }
+            vc.onDismiss = { [weak self] in
+                self?.restoreBrowserFocus()
             }
             self.activeExportVC = vc
             self.present(vc, animated: true)
@@ -1063,8 +1310,7 @@ final class BrowserViewController: UIViewController {
         }
 
         if toolbarVisible {
-            if presses.contains(where: { $0.type == .menu }) {
-                setToolbarVisible(false)
+            if presses.contains(where: { $0.type == .menu || $0.type == .playPause }) {
                 return
             }
             super.pressesBegan(presses, with: event)
@@ -1078,10 +1324,20 @@ final class BrowserViewController: UIViewController {
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if presentedViewController != nil || toolbarVisible {
+        if presentedViewController != nil {
             super.pressesEnded(presses, with: event)
             return
         }
+
+        if toolbarVisible {
+            if presses.contains(where: { $0.type == .menu || $0.type == .playPause }) {
+                setToolbarVisible(false)
+                return
+            }
+            super.pressesEnded(presses, with: event)
+            return
+        }
+
         if inputController.handlePressesEnded(presses) {
             return
         }
@@ -1137,20 +1393,40 @@ final class BrowserViewController: UIViewController {
         (function() {
             var vw = window.innerWidth || document.documentElement.clientWidth || \(viewW);
             var vh = window.innerHeight || document.documentElement.clientHeight || \(viewH);
-            var cssZoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-            var x = \(pt.x) * (vw / \(viewW)) / cssZoom;
-            var y = \(pt.y) * (vh / \(viewH)) / cssZoom;
+            var x = \(pt.x) * (vw / \(viewW));
+            var y = \(pt.y) * (vh / \(viewH));
             var doc = document;
-            var el = doc.elementFromPoint(x, y);
             var localX = x, localY = y;
-            for (var depth = 0; depth < 3 && el && el.tagName && el.tagName.toLowerCase() === 'iframe'; depth++) {
+
+            function deepHit(d, px, py) {
+                var node = d.elementFromPoint(px, py);
+                while (node && node.shadowRoot && typeof node.shadowRoot.elementFromPoint === 'function') {
+                    var inner = node.shadowRoot.elementFromPoint(px, py);
+                    if (!inner || inner === node) break;
+                    node = inner;
+                }
+                return node;
+            }
+            function tvClosest(node, sel) {
+                var cur = node;
+                while (cur) {
+                    if (cur.matches && cur.matches(sel)) return cur;
+                    if (cur.parentElement) { cur = cur.parentElement; continue; }
+                    var root = cur.getRootNode ? cur.getRootNode() : null;
+                    cur = (root && root.host) ? root.host : null;
+                }
+                return null;
+            }
+
+            var el = deepHit(doc, localX, localY);
+            for (var depth = 0; depth < 4 && el && el.tagName && el.tagName.toLowerCase() === 'iframe'; depth++) {
                 try {
                     var idoc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
                     if (!idoc) break;
                     var r = el.getBoundingClientRect();
                     localX = localX - r.left;
                     localY = localY - r.top;
-                    var inner = idoc.elementFromPoint(localX, localY);
+                    var inner = deepHit(idoc, localX, localY);
                     if (!inner) break;
                     el = inner;
                     doc = idoc;
@@ -1176,8 +1452,17 @@ final class BrowserViewController: UIViewController {
             var isText = (tag === 'textarea') ||
                          (tag === 'input' && nonText.indexOf((el.getAttribute('type') || 'text').toLowerCase()) === -1) ||
                          !!el.isContentEditable;
-            var link = el.closest ? el.closest('a[href]') : null;
-            var clickable = link || (el.closest && el.closest('button, select, label, summary, [role="button"], [role="link"], [onclick]'));
+            var link = tvClosest(el, 'a[href]');
+            var clickable = link || tvClosest(el, 'a, button, select, label, summary, details, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [onclick], [tabindex]');
+            if (!clickable) {
+                var cur = el;
+                for (var i = 0; i < 4 && cur; i++) {
+                    try {
+                        if (getComputedStyle(cur).cursor === 'pointer') { clickable = cur; break; }
+                    } catch (e) {}
+                    cur = cur.parentElement;
+                }
+            }
             var href = null;
             if (link && link.href) {
                 var rawHref = (link.getAttribute('href') || '').trim();
@@ -1239,9 +1524,8 @@ final class BrowserViewController: UIViewController {
         (function() {
             var vw = window.innerWidth || document.documentElement.clientWidth || \(viewW);
             var vh = window.innerHeight || document.documentElement.clientHeight || \(viewH);
-            var cssZoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-            var x = \(pt.x) * (vw / \(viewW)) / cssZoom;
-            var y = \(pt.y) * (vh / \(viewH)) / cssZoom;
+            var x = \(pt.x) * (vw / \(viewW));
+            var y = \(pt.y) * (vh / \(viewH));
             var el = document.elementFromPoint(x, y);
             while (el && el !== document.body && el !== document.documentElement) {
                 var st = getComputedStyle(el);
@@ -1291,32 +1575,70 @@ final class BrowserViewController: UIViewController {
         let pt = cursorView.center
         let viewW = max(1, view.bounds.width)
         let viewH = max(1, view.bounds.height)
+        let navCountBefore = engine.mainFrameNavigationCount
+        let urlBefore = engine.currentURL
+        let tabsCountBefore = tabs.count
 
         let js = """
         (function() {
             var vw = window.innerWidth || document.documentElement.clientWidth || \(viewW);
             var vh = window.innerHeight || document.documentElement.clientHeight || \(viewH);
-            var cssZoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-            var x = \(pt.x) * (vw / \(viewW)) / cssZoom;
-            var y = \(pt.y) * (vh / \(viewH)) / cssZoom;
+            var x = \(pt.x) * (vw / \(viewW));
+            var y = \(pt.y) * (vh / \(viewH));
+
+            function deepHit(d, px, py) {
+                var node = d.elementFromPoint(px, py);
+                while (node && node.shadowRoot && typeof node.shadowRoot.elementFromPoint === 'function') {
+                    var inner = node.shadowRoot.elementFromPoint(px, py);
+                    if (!inner || inner === node) break;
+                    node = inner;
+                }
+                return node;
+            }
+            function tvClosest(node, sel) {
+                var cur = node;
+                while (cur) {
+                    if (cur.matches && cur.matches(sel)) return cur;
+                    if (cur.parentElement) { cur = cur.parentElement; continue; }
+                    var root = cur.getRootNode ? cur.getRootNode() : null;
+                    cur = (root && root.host) ? root.host : null;
+                }
+                return null;
+            }
 
             var doc = document;
             var win = window;
-            var el = doc.elementFromPoint(x, y);
+            var el = deepHit(doc, x, y);
             var localX = x, localY = y;
-            for (var depth = 0; depth < 3 && el && el.tagName && el.tagName.toLowerCase() === 'iframe'; depth++) {
+            for (var depth = 0; depth < 4 && el && el.tagName && el.tagName.toLowerCase() === 'iframe'; depth++) {
+                var r = el.getBoundingClientRect();
+                var nextX = localX - r.left;
+                var nextY = localY - r.top;
                 try {
                     var idoc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
-                    if (!idoc) break;
-                    var r = el.getBoundingClientRect();
-                    localX = localX - r.left;
-                    localY = localY - r.top;
-                    var inner = idoc.elementFromPoint(localX, localY);
+                    if (!idoc) {
+                        if (el.contentWindow) {
+                            window.__tvBrowserLastClick = Date.now();
+                            el.contentWindow.postMessage({ __tvBrowserBridge: true, action: 'click', rx: nextX, ry: nextY }, '*');
+                            return JSON.stringify({ kind: 'iframeForwarded' });
+                        }
+                        break;
+                    }
+                    localX = nextX;
+                    localY = nextY;
+                    var inner = deepHit(idoc, localX, localY);
                     if (!inner) break;
                     el = inner;
                     doc = idoc;
                     win = el.contentWindow || doc.defaultView || window;
-                } catch (e) { break; }
+                } catch (e) {
+                    if (el.contentWindow) {
+                        window.__tvBrowserLastClick = Date.now();
+                        el.contentWindow.postMessage({ __tvBrowserBridge: true, action: 'click', rx: nextX, ry: nextY }, '*');
+                        return JSON.stringify({ kind: 'iframeForwarded' });
+                    }
+                    break;
+                }
             }
             if (!el) return null;
             window.__tvBrowserLastClick = Date.now();
@@ -1335,7 +1657,7 @@ final class BrowserViewController: UIViewController {
                 return role === 'textbox' || role === 'searchbox' || role === 'combobox';
             }
 
-            var selectEl = (el.tagName && el.tagName.toLowerCase() === 'select') ? el : (el.closest ? el.closest('select') : null);
+            var selectEl = (el.tagName && el.tagName.toLowerCase() === 'select') ? el : tvClosest(el, 'select');
             if (selectEl && !selectEl.disabled) {
                 window.__tvBrowserActiveSelect = selectEl;
                 var options = Array.prototype.slice.call(selectEl.options || []).map(function(o, idx) {
@@ -1350,14 +1672,14 @@ final class BrowserViewController: UIViewController {
 
             var inputEl = null;
             if (isTextInput(el)) inputEl = el;
-            if (!inputEl && el.closest) {
-                var c = el.closest('input, textarea, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], [role="searchbox"]');
+            if (!inputEl) {
+                var c = tvClosest(el, 'input, textarea, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], [role="searchbox"]');
                 if (isTextInput(c)) inputEl = c;
             }
             if (!inputEl && el.tagName && el.tagName.toLowerCase() === 'label' && el.control && isTextInput(el.control)) {
                 inputEl = el.control;
             }
-            if (!inputEl && el.querySelector) {
+            if (!inputEl && el.querySelector && !tvClosest(el, 'button, a[href], [role="button"], [role="tab"]')) {
                 var rect = el.getBoundingClientRect();
                 if (rect.width < 900 && rect.height < 160) {
                     var innerInp = el.querySelector('input:not([type="hidden"]), textarea, [contenteditable="true"]');
@@ -1372,7 +1694,7 @@ final class BrowserViewController: UIViewController {
 
                 var formUsername = '';
                 if (itype === 'password') {
-                    var frm = inputEl.form || (inputEl.closest ? inputEl.closest('form') : null);
+                    var frm = inputEl.form || tvClosest(inputEl, 'form');
                     var scope = frm || doc;
                     var uField = scope.querySelector('input[type="email"], input[autocomplete="username"], input[name*="user" i], input[name*="mail" i], input[type="text"]');
                     if (uField && uField.value) formUsername = uField.value;
@@ -1388,7 +1710,18 @@ final class BrowserViewController: UIViewController {
             }
 
             window.__tvBrowserActiveInput = null;
-            var target = (el.closest && el.closest('a[href], button, input, select, label, summary, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [onclick]')) || el;
+            var target = tvClosest(el, 'a[href], a, button, input, select, textarea, label, summary, details, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [onclick], [tabindex]');
+            if (!target) {
+                var cur = el;
+                for (var i = 0; i < 4 && cur; i++) {
+                    try {
+                        if (getComputedStyle(cur).cursor === 'pointer') { target = cur; break; }
+                    } catch (e) {}
+                    cur = cur.parentElement;
+                }
+            }
+            if (!target) target = el;
+
             var opts = { bubbles: true, cancelable: true, view: win, clientX: localX, clientY: localY, screenX: localX, screenY: localY, button: 0, buttons: 1 };
             try {
                 if (typeof PointerEvent === 'function') {
@@ -1406,13 +1739,28 @@ final class BrowserViewController: UIViewController {
                 }
             } catch (e) {}
             target.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, opts, { buttons: 0 })));
-            target.dispatchEvent(new MouseEvent('click', Object.assign({}, opts, { buttons: 0, detail: 1 })));
+            var notPrevented = target.dispatchEvent(new MouseEvent('click', Object.assign({}, opts, { buttons: 0, detail: 1 })));
 
-            return JSON.stringify({ kind: 'clicked' });
+            var link = tvClosest(el, 'a[href]');
+            var href = null;
+            var linkTarget = null;
+            if (link && link.href) {
+                var raw = (link.getAttribute('href') || '').trim();
+                if (raw.indexOf('javascript:') !== 0 && raw.charAt(0) !== '#') {
+                    href = link.href;
+                    linkTarget = (link.getAttribute('target') || '').toLowerCase();
+                }
+            }
+            return JSON.stringify({
+                kind: 'clicked',
+                href: href,
+                target: linkTarget,
+                prevented: !notPrevented
+            });
         })();
         """
 
-        engine.evaluateJavaScript(js) { [weak self] result, _ in
+        engine.evaluateJavaScript(js) { [weak self, weak engine] result, _ in
             guard let self = self,
                   let jsonStr = result as? String,
                   let data = jsonStr.data(using: .utf8),
@@ -1440,6 +1788,28 @@ final class BrowserViewController: UIViewController {
                     self.promptSelectOptions(title: title, options: options)
                 } else {
                     self.isWebInputFocused = false
+                    if kind == "clicked",
+                       let href = obj["href"] as? String,
+                       let url = URL(string: href),
+                       let scheme = url.scheme?.lowercased(),
+                       ["http", "https"].contains(scheme),
+                       (obj["prevented"] as? Bool) != true {
+                        let linkTarget = obj["target"] as? String ?? ""
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self, weak engine] in
+                            guard let self = self, let engine = engine, engine === self.currentEngine else { return }
+                            let navigated = engine.mainFrameNavigationCount != navCountBefore
+                            let urlChanged = engine.currentURL != urlBefore
+                            let tabAdded = self.tabs.count != tabsCountBefore
+                            let loadingStarted = engine.isLoading
+                            if !navigated && !urlChanged && !tabAdded && !loadingStarted {
+                                if linkTarget == "_blank" {
+                                    self.openTab(url: url, switchToIt: true)
+                                } else {
+                                    self.load(url: url)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1463,9 +1833,12 @@ final class BrowserViewController: UIViewController {
                 })();
                 """
                 self?.currentEngine?.evaluateJavaScript(js, completion: nil)
+                self?.restoreBrowserFocus()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
         present(alert, animated: true)
     }
 
@@ -1481,17 +1854,20 @@ final class BrowserViewController: UIViewController {
             tf.clearButtonMode = .whileEditing
             self.attachSubmitOnReturn(tf, alert: alert) { [weak self] text in
                 self?.handleEnteredText(text, isPassword: isPassword, detectedUsername: detectedUsername, submit: true)
+                self?.restoreBrowserFocus()
             }
         }
 
         let submitAction = UIAlertAction(title: "Escribir y Enviar", style: .default) { [weak self, weak alert] _ in
             let text = alert?.textFields?.first?.text ?? ""
             self?.handleEnteredText(text, isPassword: isPassword, detectedUsername: detectedUsername, submit: true)
+            self?.restoreBrowserFocus()
         }
         alert.addAction(submitAction)
         alert.addAction(UIAlertAction(title: "Solo escribir", style: .default) { [weak self, weak alert] _ in
             let text = alert?.textFields?.first?.text ?? ""
             self?.handleEnteredText(text, isPassword: isPassword, detectedUsername: detectedUsername, submit: false)
+            self?.restoreBrowserFocus()
         })
         alert.preferredAction = submitAction
 
@@ -1502,11 +1878,14 @@ final class BrowserViewController: UIViewController {
                 alert.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
                     let value = isPassword ? cred.password : cred.username
                     self?.applyWebTextInput(value, submit: isPassword)
+                    self?.restoreBrowserFocus()
                 })
             }
         }
 
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
         present(alert, animated: true)
     }
 
@@ -1532,10 +1911,13 @@ final class BrowserViewController: UIViewController {
             message: "Guardar credenciales para \(host) (\(userDisplay)) en el llavero de Apple TV.",
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Guardar", style: .default) { _ in
+        alert.addAction(UIAlertAction(title: "Guardar", style: .default) { [weak self] _ in
             BrowserStore.shared.saveCredential(host: host, username: username, password: password)
+            self?.restoreBrowserFocus()
         })
-        alert.addAction(UIAlertAction(title: "Ahora no", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Ahora no", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
         present(alert, animated: true)
     }
 
@@ -1943,7 +2325,10 @@ extension BrowserViewController: TVWebEngineDelegate {
     func webEngine(_ engine: TVWebEngine, runJavaScriptAlert message: String, completion: @escaping () -> Void) {
         let presenter = topPresenter()
         let alert = UIAlertController(title: currentEngine?.currentURL?.host ?? "Aviso", message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Aceptar", style: .default) { _ in completion() })
+        alert.addAction(UIAlertAction(title: "Aceptar", style: .default) { [weak self] _ in
+            completion()
+            self?.restoreBrowserFocus()
+        })
         presenter.present(alert, animated: true)
     }
 
@@ -1951,8 +2336,14 @@ extension BrowserViewController: TVWebEngineDelegate {
     func webEngine(_ engine: TVWebEngine, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) {
         let presenter = topPresenter()
         let alert = UIAlertController(title: currentEngine?.currentURL?.host ?? "Confirmar", message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Aceptar", style: .default) { _ in completion(true) })
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { _ in completion(false) })
+        alert.addAction(UIAlertAction(title: "Aceptar", style: .default) { [weak self] _ in
+            completion(true)
+            self?.restoreBrowserFocus()
+        })
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            completion(false)
+            self?.restoreBrowserFocus()
+        })
         presenter.present(alert, animated: true)
     }
 
@@ -1961,10 +2352,14 @@ extension BrowserViewController: TVWebEngineDelegate {
         let presenter = topPresenter()
         let alert = UIAlertController(title: currentEngine?.currentURL?.host ?? "Entrada", message: prompt, preferredStyle: .alert)
         alert.addTextField { tf in tf.text = defaultText }
-        alert.addAction(UIAlertAction(title: "Aceptar", style: .default) { [weak alert] _ in
+        alert.addAction(UIAlertAction(title: "Aceptar", style: .default) { [weak self, weak alert] _ in
             completion(alert?.textFields?.first?.text)
+            self?.restoreBrowserFocus()
         })
-        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { _ in completion(nil) })
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            completion(nil)
+            self?.restoreBrowserFocus()
+        })
         presenter.present(alert, animated: true)
     }
 

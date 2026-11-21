@@ -175,6 +175,54 @@ static NSString *TVBridgeUserScriptSource(void) {
                 "notifyVideo(e.target);"
             "}"
         "}, true);"
+        "function tvDeepHit(x, y) {"
+            "var el = document.elementFromPoint(x, y);"
+            "while (el && el.shadowRoot && typeof el.shadowRoot.elementFromPoint === 'function') {"
+                "var inner = el.shadowRoot.elementFromPoint(x, y);"
+                "if (!inner || inner === el) break;"
+                "el = inner;"
+            "}"
+            "return el;"
+        "}"
+        "function tvClosest(el, sel) {"
+            "var cur = el;"
+            "while (cur) {"
+                "if (cur.matches && cur.matches(sel)) return cur;"
+                "if (cur.parentElement) { cur = cur.parentElement; continue; }"
+                "var root = cur.getRootNode ? cur.getRootNode() : null;"
+                "cur = (root && root.host) ? root.host : null;"
+            "}"
+            "return null;"
+        "}"
+        "window.addEventListener('message', function(ev) {"
+            "var d = ev && ev.data;"
+            "if (!d || d.__tvBrowserBridge !== true) return;"
+            "var rx = Number(d.rx), ry = Number(d.ry);"
+            "if (!isFinite(rx) || !isFinite(ry)) return;"
+            "var el = tvDeepHit(rx, ry);"
+            "if (!el) return;"
+            "if (d.action === 'click') {"
+                "window.__tvBrowserLastClick = Date.now();"
+                "if (el.tagName && el.tagName.toLowerCase() === 'iframe') {"
+                    "try {"
+                        "var r = el.getBoundingClientRect();"
+                        "if (el.contentWindow) {"
+                            "el.contentWindow.postMessage({ __tvBrowserBridge: true, action: 'click', rx: rx - r.left, ry: ry - r.top }, '*');"
+                        "}"
+                    "} catch (e) {}"
+                    "return;"
+                "}"
+                "var target = tvClosest(el, 'a[href], a, button, input, select, textarea, label, summary, [role=\"button\"], [role=\"link\"], [role=\"tab\"], [role=\"menuitem\"], [onclick], [tabindex]') || el;"
+                "var opts = { bubbles: true, cancelable: true, view: window, clientX: rx, clientY: ry, screenX: rx, screenY: ry, button: 0, buttons: 1 };"
+                "try { if (typeof PointerEvent === 'function') { var p = Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, opts); target.dispatchEvent(new PointerEvent('pointerover', p)); target.dispatchEvent(new PointerEvent('pointerdown', p)); } } catch (e) {}"
+                "target.dispatchEvent(new MouseEvent('mouseover', opts));"
+                "target.dispatchEvent(new MouseEvent('mousedown', opts));"
+                "try { target.focus && target.focus(); } catch (e) {}"
+                "try { if (typeof PointerEvent === 'function') { target.dispatchEvent(new PointerEvent('pointerup', Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, opts, { buttons: 0 }))); } } catch (e) {}"
+                "target.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, opts, { buttons: 0 })));"
+                "target.dispatchEvent(new MouseEvent('click', Object.assign({}, opts, { buttons: 0, detail: 1 })));"
+            "}"
+        "});"
     "})();";
 }
 
@@ -316,6 +364,10 @@ static NSString *TVBridgeUserScriptSource(void) {
 
             _webView = wkView;
             _isUsingWKWebView = YES;
+            UIScrollView *sv = self.scrollView;
+            if (sv && [sv respondsToSelector:@selector(setContentInsetAdjustmentBehavior:)]) {
+                sv.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+            }
             [TVScriptMessageRouter registerEngine:self forWebView:wkView];
             [self startObservingWKWebView:wkView];
         } else {
@@ -332,6 +384,10 @@ static NSString *TVBridgeUserScriptSource(void) {
                 }
                 _webView = uiWeb;
                 _isUsingWKWebView = NO;
+                UIScrollView *sv = self.scrollView;
+                if (sv && [sv respondsToSelector:@selector(setContentInsetAdjustmentBehavior:)]) {
+                    sv.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+                }
             } else {
                 _webView = [[UIView alloc] initWithFrame:frame];
                 _webView.backgroundColor = [UIColor darkGrayColor];
@@ -530,8 +586,15 @@ static NSString *TVBridgeUserScriptSource(void) {
 }
 
 - (BOOL)applyNativePageZoom:(CGFloat)zoom {
-    if (_isUsingWKWebView && [_webView respondsToSelector:@selector(setPageZoom:)]) {
-        ((void (*)(id, SEL, CGFloat))objc_msgSend)(_webView, @selector(setPageZoom:), zoom);
+    if (!_isUsingWKWebView || !_webView) return NO;
+    SEL pageZoomSel = NSSelectorFromString(@"setPageZoom:");
+    if ([_webView respondsToSelector:pageZoomSel]) {
+        ((void (*)(id, SEL, CGFloat))objc_msgSend)(_webView, pageZoomSel, zoom);
+        return YES;
+    }
+    SEL privateZoomSel = NSSelectorFromString(@"_setPageZoomFactor:");
+    if ([_webView respondsToSelector:privateZoomSel]) {
+        ((void (*)(id, SEL, double))objc_msgSend)(_webView, privateZoomSel, (double)zoom);
         return YES;
     }
     return NO;

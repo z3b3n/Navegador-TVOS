@@ -6,14 +6,15 @@ final class ExportViewController: UIViewController {
     var serverURLString: String?
     var connectedClientsCount: Int = 0
     var onStopServerRequested: (() -> Void)?
+    var onDismiss: (() -> Void)?
 
     private let titleLabel = UILabel()
     private let infoLabel = UILabel()
     private let urlLabel = UILabel()
     private let clientsLabel = UILabel()
     private let qrImageView = UIImageView()
-    private let closeButton = UIButton(type: .system)
-    private let stopButton = UIButton(type: .system)
+    private let closeButton = UIButton(type: .custom)
+    private let stopButton = UIButton(type: .custom)
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         [closeButton]
@@ -22,6 +23,10 @@ final class ExportViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor(white: 0.08, alpha: 1.0)
+
+        let menuTap = UITapGestureRecognizer(target: self, action: #selector(closeTapped))
+        menuTap.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        view.addGestureRecognizer(menuTap)
 
         let stack = UIStackView()
         stack.axis = .vertical
@@ -125,12 +130,16 @@ final class ExportViewController: UIViewController {
     }
 
     @objc private func closeTapped() {
-        dismiss(animated: true)
+        dismiss(animated: true) { [weak self] in
+            self?.onDismiss?()
+        }
     }
 
     @objc private func stopTapped() {
         onStopServerRequested?()
-        dismiss(animated: true)
+        dismiss(animated: true) { [weak self] in
+            self?.onDismiss?()
+        }
     }
 
     private func generateQRCode(from string: String) -> UIImage? {

@@ -6,15 +6,18 @@ final class StartPageViewController: UIViewController {
     var onSelectWebApp: ((WebAppItem) -> Void)?
     var onClose: (() -> Void)?
 
-    private enum Section: Int, CaseIterable {
+    private enum Section: Int {
         case webApps
         case favorites
         case recent
     }
 
+    private var activeSections: [Section] = []
     private var collectionView: UICollectionView!
-    private let searchBarButton = UIButton(type: .system)
-    private let closeButton = UIButton(type: .system)
+    private let searchBarButton = UIButton(type: .custom)
+    private let closeButton = UIButton(type: .custom)
+    private let topFocusGuide = UIFocusGuide()
+    private let gridFocusGuide = UIFocusGuide()
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         [searchBarButton]
@@ -23,13 +26,28 @@ final class StartPageViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 0.06, green: 0.08, blue: 0.13, alpha: 1.0)
+        rebuildSections()
         setupHeader()
         setupCollectionView()
+        setupFocusGuides()
+
+        let menuTap = UITapGestureRecognizer(target: self, action: #selector(closeTapped))
+        menuTap.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        view.addGestureRecognizer(menuTap)
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        rebuildSections()
         collectionView.reloadData()
+    }
+
+    private func rebuildSections() {
+        var next: [Section] = []
+        if !BrowserStore.shared.webApps.isEmpty { next.append(.webApps) }
+        if !BrowserStore.shared.bookmarks.isEmpty { next.append(.favorites) }
+        if !recentItems().isEmpty { next.append(.recent) }
+        activeSections = next
     }
 
     private func setupHeader() {
@@ -42,7 +60,7 @@ final class StartPageViewController: UIViewController {
 
         closeButton.setTitle("Volver al navegador", for: .normal)
         closeButton.titleLabel?.font = .systemFont(ofSize: 24, weight: .semibold)
-        closeButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 24, bottom: 12, right: 24)
+        closeButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 26, bottom: 12, right: 26)
         closeButton.layer.cornerRadius = 14
         closeButton.backgroundColor = UIColor.white.withAlphaComponent(0.14)
         closeButton.setTitleColor(.white, for: .normal)
@@ -50,33 +68,35 @@ final class StartPageViewController: UIViewController {
         closeButton.addTarget(self, action: #selector(closeTapped), for: .primaryActionTriggered)
         view.addSubview(closeButton)
 
-        searchBarButton.setTitle("🔍  Buscar en \(BrowserStore.shared.searchEngine.displayName) o escribir dirección web...", for: .normal)
+        searchBarButton.setTitle("🔍   Buscar en \(BrowserStore.shared.searchEngine.displayName) o escribir dirección web...", for: .normal)
         searchBarButton.titleLabel?.font = .systemFont(ofSize: 28, weight: .medium)
-        searchBarButton.contentHorizontalAlignment = .left
-        searchBarButton.contentEdgeInsets = UIEdgeInsets(top: 20, left: 28, bottom: 20, right: 28)
-        searchBarButton.layer.cornerRadius = 18
+        searchBarButton.contentHorizontalAlignment = .center
+        searchBarButton.contentEdgeInsets = UIEdgeInsets(top: 20, left: 32, bottom: 20, right: 32)
+        searchBarButton.layer.cornerRadius = 20
+        searchBarButton.layer.borderWidth = 1.5
+        searchBarButton.layer.borderColor = UIColor.white.withAlphaComponent(0.20).cgColor
         searchBarButton.backgroundColor = UIColor.white.withAlphaComponent(0.12)
-        searchBarButton.setTitleColor(UIColor.white.withAlphaComponent(0.9), for: .normal)
+        searchBarButton.setTitleColor(UIColor.white.withAlphaComponent(0.95), for: .normal)
         searchBarButton.translatesAutoresizingMaskIntoConstraints = false
         searchBarButton.addTarget(self, action: #selector(searchTapped), for: .primaryActionTriggered)
         view.addSubview(searchBarButton)
 
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
+            titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 28),
             titleLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 60),
 
             closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -60),
 
             searchBarButton.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 24),
-            searchBarButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 60),
-            searchBarButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -60),
-            searchBarButton.heightAnchor.constraint(equalToConstant: 74)
+            searchBarButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            searchBarButton.widthAnchor.constraint(equalToConstant: 1180),
+            searchBarButton.heightAnchor.constraint(equalToConstant: 78)
         ])
     }
 
     private func setupCollectionView() {
-        let layout = UICollectionViewCompositionalLayout { sectionIndex, _ in
+        let layout = UICollectionViewCompositionalLayout { _, _ in
             let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.2), heightDimension: .absolute(150))
             let item = NSCollectionLayoutItem(layoutSize: itemSize)
             item.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10)
@@ -85,7 +105,7 @@ final class StartPageViewController: UIViewController {
             let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
 
             let section = NSCollectionLayoutSection(group: group)
-            section.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 50, bottom: 26, trailing: 50)
+            section.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 50, bottom: 24, trailing: 50)
             let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(44))
             let header = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: headerSize,
@@ -93,13 +113,13 @@ final class StartPageViewController: UIViewController {
                 alignment: .top
             )
             section.boundarySupplementaryItems = [header]
-            _ = sectionIndex
             return section
         }
 
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = .clear
+        collectionView.remembersLastFocusedIndexPath = true
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(StartPageTileCell.self, forCellWithReuseIdentifier: StartPageTileCell.reuseId)
@@ -120,6 +140,26 @@ final class StartPageViewController: UIViewController {
         ])
     }
 
+    private func setupFocusGuides() {
+        view.addLayoutGuide(topFocusGuide)
+        topFocusGuide.preferredFocusEnvironments = [closeButton]
+        NSLayoutConstraint.activate([
+            topFocusGuide.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            topFocusGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topFocusGuide.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor),
+            topFocusGuide.bottomAnchor.constraint(equalTo: searchBarButton.topAnchor)
+        ])
+
+        view.addLayoutGuide(gridFocusGuide)
+        gridFocusGuide.preferredFocusEnvironments = [collectionView]
+        NSLayoutConstraint.activate([
+            gridFocusGuide.topAnchor.constraint(equalTo: searchBarButton.bottomAnchor),
+            gridFocusGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            gridFocusGuide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            gridFocusGuide.bottomAnchor.constraint(equalTo: collectionView.topAnchor)
+        ])
+    }
+
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
         super.didUpdateFocus(in: context, with: coordinator)
         coordinator.addCoordinatedAnimations({
@@ -137,14 +177,6 @@ final class StartPageViewController: UIViewController {
         }, completion: nil)
     }
 
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if presses.contains(where: { $0.type == .menu }) {
-            closeTapped()
-            return
-        }
-        super.pressesBegan(presses, with: event)
-    }
-
     @objc private func searchTapped() {
         onSearchTapped?()
     }
@@ -157,9 +189,9 @@ final class StartPageViewController: UIViewController {
         guard gesture.state == .began,
               let focusedCell = view.window?.windowScene?.focusSystem?.focusedItem as? UICollectionViewCell,
               let indexPath = collectionView.indexPath(for: focusedCell),
-              let section = Section(rawValue: indexPath.section) else { return }
+              activeSections.indices.contains(indexPath.section) else { return }
 
-        switch section {
+        switch activeSections[indexPath.section] {
         case .webApps:
             let app = BrowserStore.shared.webApps[indexPath.item]
             let alert = UIAlertController(title: app.title, message: app.urlString, preferredStyle: .alert)
@@ -169,10 +201,12 @@ final class StartPageViewController: UIViewController {
             let autoTitle = app.autoLaunch ? "Quitar inicio automático" : "Abrir automáticamente al iniciar TVBrowser"
             alert.addAction(UIAlertAction(title: autoTitle, style: .default) { [weak self] _ in
                 BrowserStore.shared.toggleAutoLaunch(webAppID: app.id)
+                self?.rebuildSections()
                 self?.collectionView.reloadData()
             })
             alert.addAction(UIAlertAction(title: "Eliminar WebApp", style: .destructive) { [weak self] _ in
                 BrowserStore.shared.removeWebApp(id: app.id)
+                self?.rebuildSections()
                 self?.collectionView.reloadData()
             })
             alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
@@ -193,10 +227,12 @@ final class StartPageViewController: UIViewController {
                     adBlockEnabled: AdBlocker.shared.isEnabled,
                     autoLaunch: false
                 )
+                self?.rebuildSections()
                 self?.collectionView.reloadData()
             })
             alert.addAction(UIAlertAction(title: "Eliminar favorito", style: .destructive) { [weak self] _ in
                 BrowserStore.shared.removeBookmark(at: indexPath.item)
+                self?.rebuildSections()
                 self?.collectionView.reloadData()
             })
             alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
@@ -214,37 +250,33 @@ final class StartPageViewController: UIViewController {
 
 extension StartPageViewController: UICollectionViewDataSource, UICollectionViewDelegate {
     func numberOfSections(in collectionView: UICollectionView) -> Int {
-        Section.allCases.count
+        activeSections.count
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        switch Section(rawValue: section) {
+        switch activeSections[section] {
         case .webApps: return BrowserStore.shared.webApps.count
         case .favorites: return BrowserStore.shared.bookmarks.count
         case .recent: return recentItems().count
-        case .none: return 0
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
         let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: StartPageHeaderView.reuseId, for: indexPath) as! StartPageHeaderView
-        switch Section(rawValue: indexPath.section) {
+        switch activeSections[indexPath.section] {
         case .webApps:
-            let count = BrowserStore.shared.webApps.count
-            header.titleLabel.text = count > 0 ? "WebApps (Modo pantalla completa) · Mantén pulsado para opciones" : "WebApps (Usa ⋯ → Guardar como WebApp en cualquier web)"
+            header.titleLabel.text = "WebApps (Pantalla completa) · Mantén pulsado Seleccionar para opciones"
         case .favorites:
             header.titleLabel.text = "Favoritos"
         case .recent:
             header.titleLabel.text = "Visitados recientemente"
-        case .none:
-            header.titleLabel.text = ""
         }
         return header
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: StartPageTileCell.reuseId, for: indexPath) as! StartPageTileCell
-        switch Section(rawValue: indexPath.section) {
+        switch activeSections[indexPath.section] {
         case .webApps:
             let app = BrowserStore.shared.webApps[indexPath.item]
             let badge = app.autoLaunch ? "AUTO" : "APP"
@@ -255,14 +287,12 @@ extension StartPageViewController: UICollectionViewDataSource, UICollectionViewD
         case .recent:
             let hist = recentItems()[indexPath.item]
             cell.configure(title: hist.title, urlString: hist.urlString, badge: nil, tint: .systemTeal)
-        case .none:
-            break
         }
         return cell
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        switch Section(rawValue: indexPath.section) {
+        switch activeSections[indexPath.section] {
         case .webApps:
             let app = BrowserStore.shared.webApps[indexPath.item]
             onSelectWebApp?(app)
@@ -272,8 +302,6 @@ extension StartPageViewController: UICollectionViewDataSource, UICollectionViewD
         case .recent:
             let hist = recentItems()[indexPath.item]
             if let url = URL(string: hist.urlString) { onSelectURL?(url) }
-        case .none:
-            break
         }
     }
 }
@@ -312,7 +340,7 @@ private final class StartPageTileCell: UICollectionViewCell {
         card.translatesAutoresizingMaskIntoConstraints = false
         card.backgroundColor = UIColor.white.withAlphaComponent(0.10)
         card.layer.cornerRadius = 18
-        card.layer.borderWidth = 2
+        card.layer.borderWidth = 2.5
         card.layer.borderColor = UIColor.clear.cgColor
         contentView.addSubview(card)
 
@@ -392,12 +420,16 @@ private final class StartPageTileCell: UICollectionViewCell {
         coordinator.addCoordinatedAnimations({
             if self.isFocused {
                 self.card.transform = CGAffineTransform(scaleX: 1.06, y: 1.06)
-                self.card.backgroundColor = UIColor.white.withAlphaComponent(0.22)
-                self.card.layer.borderColor = UIColor.white.cgColor
+                self.card.backgroundColor = .white
+                self.card.layer.borderColor = UIColor.systemBlue.cgColor
+                self.titleLabel.textColor = .black
+                self.hostLabel.textColor = UIColor.black.withAlphaComponent(0.65)
             } else {
                 self.card.transform = .identity
                 self.card.backgroundColor = UIColor.white.withAlphaComponent(0.10)
                 self.card.layer.borderColor = UIColor.clear.cgColor
+                self.titleLabel.textColor = .white
+                self.hostLabel.textColor = UIColor.white.withAlphaComponent(0.6)
             }
         }, completion: nil)
     }

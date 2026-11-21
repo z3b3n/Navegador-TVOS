@@ -124,7 +124,13 @@ final class AdBlocker {
             if (!isAuthHost && window.open) {
                 var origOpen = window.open.bind(window);
                 window.open = function(url, target, features) {
-                    var recentClick = window.__tvBrowserLastClick && (Date.now() - window.__tvBrowserLastClick) < 1800;
+                    var lastClick = window.__tvBrowserLastClick || 0;
+                    try {
+                        if (!lastClick && window.top && window.top.__tvBrowserLastClick) {
+                            lastClick = window.top.__tvBrowserLastClick;
+                        }
+                    } catch (e) {}
+                    var recentClick = lastClick && (Date.now() - lastClick) < 3000;
                     if (recentClick) {
                         return origOpen(url, target, features);
                     }
