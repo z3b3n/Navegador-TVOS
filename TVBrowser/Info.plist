@@ -11,15 +11,15 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>$(PRODUCT_NAME)</string>
+    <string>Platanet</string>
     <key>CFBundleDisplayName</key>
-    <string>TVBrowser</string>
+    <string>Platanet</string>
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.7</string>
+    <string>2.1.0</string>
     <key>CFBundleVersion</key>
-    <string>9</string>
+    <string>10</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSAppTransportSecurity</key>
@@ -28,7 +28,7 @@
         <true/>
     </dict>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>TVBrowser usa la red local para ofrecer control remoto (ratón, trackpad y teclado) y sincronización de marcadores desde tu móvil u ordenador.</string>
+    <string>Platanet usa la red local para ofrecer control remoto (ratón, trackpad y teclado) y sincronización de marcadores desde tu móvil u ordenador.</string>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
         <string>arm64</string>

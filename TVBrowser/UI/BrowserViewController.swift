@@ -25,17 +25,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private var connectedRemoteClients = 0
     private weak var activeExportVC: ExportViewController?
 
-    // Slim always-accessible floating mini-bar for TV remotes
-    private let miniBarContainer = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
-    private let miniBarStack = UIStackView()
-    private let miniBackChip = UILabel()
-    private let miniURLChip = UILabel()
-    private let miniModeChip = UILabel()
-    private let miniZoomChip = UILabel()
-    private let miniToolbarChip = UILabel()
-    private weak var hoveredMiniChip: UILabel?
-    private var miniBarEnabled = true
-
     // Compact Safari-style Toolbar
     private let toolbarContainer = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private let toolbarStack = UIStackView()
@@ -59,10 +48,15 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private var toastHideWorkItem: DispatchWorkItem?
 
     private var toolbarVisible = false
+    private var toolbarAutoHideWorkItem: DispatchWorkItem?
+    private let toolbarInactivityTimeout: TimeInterval = 6.5
+    private var suppressTopEdgeToolbarUntil: CFTimeInterval = 0
+    private var lastScrolledDownTime: CFTimeInterval = 0
     private var hasPositionedInitialCursor = false
     private var lastPanPoint: CGPoint = .zero
     private var panStartPoint: CGPoint = .zero
     private var isWebInputFocused = false
+    private var cachedCursorOverInnerScroll = false
     private var pendingScrollDelta: CGPoint = .zero
     private var innerScrollInFlight = false
     private var lastHoverCheckTime: CFTimeInterval = 0
@@ -101,7 +95,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
         setupFocusSink()
         setupWebHost()
-        setupMiniBar()
         setupToolbar()
         setupProgressAndOverlays()
         setupCursor()
@@ -123,10 +116,9 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let hostBounds = webHostContainer.bounds
-        if !hostBounds.isEmpty {
-            for tab in tabs where tab.engine.webView.frame != hostBounds {
-                tab.engine.webView.frame = hostBounds
+        if !webHostContainer.bounds.isEmpty {
+            for tab in tabs {
+                applyViewportTransform(for: tab)
             }
         }
         if view.bounds.width > 100 && view.bounds.height > 100 {
@@ -171,6 +163,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             self.updateFocusIfNeeded()
             if !self.toolbarVisible {
                 self.view.bringSubviewToFront(self.cursorView)
+            } else if self.presentedViewController == nil {
+                self.scheduleToolbarAutoHide()
             }
         }
         apply()
@@ -187,132 +181,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             webHostContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webHostContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
-    }
-
-    private func setupMiniBar() {
-        miniBarContainer.translatesAutoresizingMaskIntoConstraints = false
-        miniBarContainer.isUserInteractionEnabled = false
-        miniBarContainer.layer.cornerRadius = 22
-        miniBarContainer.layer.borderWidth = 1.2
-        miniBarContainer.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
-        miniBarContainer.clipsToBounds = true
-        miniBarContainer.alpha = 0.92
-        view.addSubview(miniBarContainer)
-
-        miniBarStack.axis = .horizontal
-        miniBarStack.spacing = 8
-        miniBarStack.alignment = .center
-        miniBarStack.translatesAutoresizingMaskIntoConstraints = false
-        miniBarContainer.contentView.addSubview(miniBarStack)
-
-        configureMiniChip(miniBackChip, text: "  ◀  ")
-        configureMiniChip(miniURLChip, text: "  🔍 Buscar o escribir URL  ", accent: true)
-        miniURLChip.lineBreakMode = .byTruncatingMiddle
-        miniURLChip.widthAnchor.constraint(lessThanOrEqualToConstant: 360).isActive = true
-        configureMiniChip(miniModeChip, text: "  🎯 Cursor  ")
-        configureMiniChip(miniZoomChip, text: "  100%  ")
-        configureMiniChip(miniToolbarChip, text: "  ☰ Menú  ")
-
-        [miniBackChip, miniURLChip, miniModeChip, miniZoomChip, miniToolbarChip].forEach {
-            miniBarStack.addArrangedSubview($0)
-        }
-
-        NSLayoutConstraint.activate([
-            miniBarContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            miniBarContainer.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            miniBarContainer.heightAnchor.constraint(equalToConstant: 46),
-
-            miniBarStack.topAnchor.constraint(equalTo: miniBarContainer.contentView.topAnchor, constant: 6),
-            miniBarStack.bottomAnchor.constraint(equalTo: miniBarContainer.contentView.bottomAnchor, constant: -6),
-            miniBarStack.leadingAnchor.constraint(equalTo: miniBarContainer.contentView.leadingAnchor, constant: 10),
-            miniBarStack.trailingAnchor.constraint(equalTo: miniBarContainer.contentView.trailingAnchor, constant: -10)
-        ])
-    }
-
-    private func configureMiniChip(_ label: UILabel, text: String, accent: Bool = false) {
-        label.text = text
-        label.font = .systemFont(ofSize: 19, weight: .semibold)
-        label.textColor = .white
-        label.textAlignment = .center
-        label.backgroundColor = accent ? UIColor.systemBlue.withAlphaComponent(0.65) : UIColor.white.withAlphaComponent(0.14)
-        label.layer.cornerRadius = 15
-        label.clipsToBounds = true
-        label.heightAnchor.constraint(equalToConstant: 34).isActive = true
-    }
-
-    private func baseBackgroundForMiniChip(_ chip: UILabel) -> UIColor {
-        if chip === miniURLChip {
-            return UIColor.systemBlue.withAlphaComponent(0.65)
-        }
-        if chip === miniModeChip && cursorView.mode == .scroll {
-            return UIColor.systemGreen.withAlphaComponent(0.55)
-        }
-        return UIColor.white.withAlphaComponent(0.14)
-    }
-
-    private func updateMiniBarHover(at point: CGPoint) -> UILabel? {
-        guard !miniBarContainer.isHidden, miniBarContainer.alpha > 0.05 else {
-            clearMiniBarHover()
-            return nil
-        }
-        let expandedFrame = miniBarContainer.frame.insetBy(dx: -8, dy: -8)
-        guard expandedFrame.contains(point) else {
-            clearMiniBarHover()
-            return nil
-        }
-        let ptInStack = view.convert(point, to: miniBarStack)
-        let chips = [miniBackChip, miniURLChip, miniModeChip, miniZoomChip, miniToolbarChip]
-        let hit = chips.first { $0.frame.insetBy(dx: -4, dy: -6).contains(ptInStack) }
-
-        if hoveredMiniChip !== hit {
-            if let prev = hoveredMiniChip {
-                prev.backgroundColor = baseBackgroundForMiniChip(prev)
-                prev.textColor = .white
-            }
-            if let next = hit {
-                next.backgroundColor = .white
-                next.textColor = .black
-            }
-            hoveredMiniChip = hit
-        }
-        return hit
-    }
-
-    private func clearMiniBarHover() {
-        if let prev = hoveredMiniChip {
-            prev.backgroundColor = baseBackgroundForMiniChip(prev)
-            prev.textColor = .white
-            hoveredMiniChip = nil
-        }
-    }
-
-    private func updateMiniBarState() {
-        miniBackChip.alpha = canNavigateBackOrCloseTab ? 1.0 : 0.40
-
-        if let currentURL = currentEngine?.currentURL ?? activeTab?.url {
-            let host = currentURL.host?.replacingOccurrences(of: "www.", with: "") ?? currentURL.absoluteString
-            miniURLChip.text = "  🔍 \(host) · Buscar/URL  "
-        } else {
-            miniURLChip.text = "  🔍 Buscar o escribir URL  "
-        }
-
-        miniModeChip.text = cursorView.mode == .pointer ? "  🎯 Cursor  " : "  ↕ Scroll  "
-        let zoomPct = Int(round((activeTab?.zoom ?? BrowserStore.shared.pageZoom) * 100))
-        miniZoomChip.text = "  \(zoomPct)%  "
-
-        for chip in [miniBackChip, miniURLChip, miniModeChip, miniZoomChip, miniToolbarChip] where chip !== hoveredMiniChip {
-            chip.backgroundColor = baseBackgroundForMiniChip(chip)
-            chip.textColor = .white
-        }
-        updateMiniBarVisibility()
-    }
-
-    private func updateMiniBarVisibility() {
-        let shouldShow = !toolbarVisible && miniBarEnabled && (activeTab?.isAppMode != true)
-        miniBarContainer.isHidden = !shouldShow
-        if !shouldShow {
-            clearMiniBarHover()
-        }
     }
 
     private func setupToolbar() {
@@ -405,6 +273,12 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 next.setTitleColor(.black, for: .normal)
             }
         }, completion: nil)
+        if toolbarVisible,
+           presentedViewController == nil,
+           let next = context.nextFocusedView,
+           next.isDescendant(of: toolbarContainer) {
+            scheduleToolbarAutoHide()
+        }
     }
 
     private func setupProgressAndOverlays() {
@@ -445,7 +319,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             linkPreviewLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 820),
             linkPreviewLabel.heightAnchor.constraint(equalToConstant: 36),
 
-            toastLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 62),
+            toastLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 18),
             toastLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             toastLabel.heightAnchor.constraint(equalToConstant: 48)
         ])
@@ -518,10 +392,10 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         )
         tab.engine.delegate = self
         tab.engine.webView.isUserInteractionEnabled = false
-        tab.engine.webView.frame = initialFrame
-        tab.engine.webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        tab.engine.webView.autoresizingMask = []
         tab.engine.webView.isHidden = true
         webHostContainer.addSubview(tab.engine.webView)
+        applyPageZoom(for: tab)
 
         applyAdBlockRuleList(to: tab)
         tabs.append(tab)
@@ -540,8 +414,9 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     private func switchToTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
-        activeTabIndex = index
         isWebInputFocused = false
+        cachedCursorOverInnerScroll = false
+        cachedPageCanScrollUp = false
 
         for (i, tab) in tabs.enumerated() {
             tab.engine.webView.isHidden = (i != index)
@@ -597,6 +472,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         tab.detectedVideoURL = nil
         lastFailedURLByTab.removeValue(forKey: tab.id)
         isWebInputFocused = false
+        cachedCursorOverInnerScroll = false
+        cachedPageCanScrollUp = false
         tab.engine.load(url)
         if tab === activeTab {
             updateToolbarState()
@@ -620,58 +497,108 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         }
     }
 
+    private func applyViewportTransform(for tab: BrowserTab) {
+        let hostBounds = webHostContainer.bounds.isEmpty
+            ? (view.bounds.isEmpty ? UIScreen.main.bounds : view.bounds)
+            : webHostContainer.bounds
+        guard !hostBounds.isEmpty else { return }
+
+        let zoom = CGFloat(max(0.75, min(2.5, tab.zoom)))
+        let targetBounds = CGRect(
+            x: 0,
+            y: 0,
+            width: hostBounds.width / zoom,
+            height: hostBounds.height / zoom
+        )
+        let targetCenter = CGPoint(x: hostBounds.midX, y: hostBounds.midY)
+        let targetTransform = abs(zoom - 1.0) < 0.005
+            ? CGAffineTransform.identity
+            : CGAffineTransform(scaleX: zoom, y: zoom)
+
+        let webView = tab.engine.webView
+        if abs(webView.bounds.width - targetBounds.width) > 0.5 || abs(webView.bounds.height - targetBounds.height) > 0.5 {
+            webView.bounds = targetBounds
+        }
+        if abs(webView.center.x - targetCenter.x) > 0.5 || abs(webView.center.y - targetCenter.y) > 0.5 {
+            webView.center = targetCenter
+        }
+        if abs(webView.transform.a - targetTransform.a) > 0.002 ||
+            abs(webView.transform.d - targetTransform.d) > 0.002 ||
+            abs(webView.transform.tx) > 0.1 ||
+            abs(webView.transform.ty) > 0.1 {
+            webView.transform = targetTransform
+        }
+    }
+
     private func applyPageZoom(for tab: BrowserTab? = nil) {
         guard let targetTab = tab ?? activeTab else { return }
-        let zoom = targetTab.zoom
-        if targetTab.engine.applyNativePageZoom(CGFloat(zoom)) { return }
-        let isDefaultZoom = abs(zoom - 1.0) < 0.01
-        let js: String
-        if isDefaultZoom {
-            js = """
-            (function() {
-                if (document.documentElement) {
-                    document.documentElement.style.zoom = '';
-                    document.documentElement.style.width = '';
-                    document.documentElement.style.overflowX = '';
-                    document.documentElement.style.webkitTextSizeAdjust = '';
-                }
-            })();
-            """
-        } else {
-            let widthPct = 100.0 / zoom
-            js = """
-            (function() {
-                if (document.documentElement) {
-                    document.documentElement.style.zoom = '\(zoom)';
-                    document.documentElement.style.width = '\(widthPct)%';
-                    document.documentElement.style.overflowX = 'clip';
-                    document.documentElement.style.webkitTextSizeAdjust = '\(Int(zoom * 100))%';
-                }
-            })();
-            """
+        applyViewportTransform(for: targetTab)
+        let resetCSSZoomJS = """
+        (function() {
+            var root = document.documentElement;
+            if (!root) return;
+            if (root.style.zoom) root.style.zoom = '';
+            if (root.style.width) root.style.width = '';
+            if (root.style.overflowX) root.style.overflowX = '';
+            if (root.style.transform) root.style.transform = '';
+            if (root.style.transformOrigin) root.style.transformOrigin = '';
+            root.style.webkitTextSizeAdjust = '100%';
+        })();
+        """
+        targetTab.engine.evaluateJavaScript(resetCSSZoomJS, completion: nil)
+    }
+
+    override func present(_ viewControllerToPresent: UIViewController, animated flag: Bool, completion: (() -> Void)? = nil) {
+        cancelToolbarAutoHide()
+        super.present(viewControllerToPresent, animated: flag, completion: completion)
+    }
+
+    private func scheduleToolbarAutoHide() {
+        cancelToolbarAutoHide()
+        guard toolbarVisible, presentedViewController == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self,
+                  self.toolbarVisible,
+                  self.presentedViewController == nil else { return }
+            self.setToolbarVisible(false)
         }
-        targetTab.engine.evaluateJavaScript(js, completion: nil)
+        toolbarAutoHideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + toolbarInactivityTimeout, execute: work)
+    }
+
+    private func cancelToolbarAutoHide() {
+        toolbarAutoHideWorkItem?.cancel()
+        toolbarAutoHideWorkItem = nil
     }
 
     private func setToolbarVisible(_ visible: Bool) {
-        guard toolbarVisible != visible else { return }
+        guard toolbarVisible != visible else {
+            if visible { scheduleToolbarAutoHide() }
+            return
+        }
         toolbarVisible = visible
         cursorView.isHidden = visible
         panGesture?.isEnabled = !visible && presentedViewController == nil
         focusSinkView.isHidden = visible
-        updateMiniBarVisibility()
         if visible {
             linkPreviewLabel.isHidden = true
             updateToolbarState()
             toolbarContainer.isHidden = false
             view.bringSubviewToFront(toolbarContainer)
+            scheduleToolbarAutoHide()
             UIView.animate(withDuration: 0.18) {
                 self.toolbarContainer.alpha = 1
             } completion: { _ in
                 self.setNeedsFocusUpdate()
                 self.updateFocusIfNeeded()
+                self.scheduleToolbarAutoHide()
             }
         } else {
+            cancelToolbarAutoHide()
+            suppressTopEdgeToolbarUntil = CACurrentMediaTime() + 0.60
+            if cursorView.center.y < 165 {
+                cursorView.center.y = 165
+            }
             UIView.animate(withDuration: 0.18, animations: {
                 self.toolbarContainer.alpha = 0
             }) { _ in
@@ -724,7 +651,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             urlButton.setTitle("🔍 Buscar en \(BrowserStore.shared.searchEngine.displayName) o URL", for: .normal)
             bookmarkStarButton.setTitle("☆", for: .normal)
         }
-        updateMiniBarState()
     }
 
     // MARK: - Toolbar & Shortcut Actions
@@ -736,11 +662,13 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             closeTab(at: activeTabIndex)
         }
         updateToolbarState()
+        if toolbarVisible { scheduleToolbarAutoHide() }
     }
 
     @objc private func forwardTapped() {
         currentEngine?.goForward()
         updateToolbarState()
+        if toolbarVisible { scheduleToolbarAutoHide() }
     }
 
     @objc private func homeTapped() {
@@ -768,6 +696,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             showToast("Guardado en favoritos ★")
         }
         updateToolbarState()
+        if toolbarVisible { scheduleToolbarAutoHide() }
     }
 
     private func setZoom(_ newZoom: Double, showNotice: Bool = true) {
@@ -784,6 +713,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         if showNotice {
             showToast("Escala \(Int(round(clamped * 100)))%")
         }
+        if toolbarVisible { scheduleToolbarAutoHide() }
     }
 
     @objc private func zoomOutTapped() {
@@ -1083,13 +1013,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 accentColor: .systemBlue
             ),
             BrowserMenuActionItem(
-                id: "toggleMiniBar",
-                icon: "▬",
-                title: "Barra rápida: \(miniBarEnabled ? "ON" : "OFF")",
-                subtitle: "Acceso superior con puntero",
-                accentColor: miniBarEnabled ? .systemGreen : .systemGray
-            ),
-            BrowserMenuActionItem(
                 id: "clearCache",
                 icon: "🗑",
                 title: "Borrar Caché",
@@ -1144,11 +1067,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 self.showToast("AdBlock \(tab.adBlockEnabled ? "ON" : "OFF")")
             case "searchEngine":
                 self.presentSearchEnginePicker()
-            case "toggleMiniBar":
-                self.miniBarEnabled.toggle()
-                self.setToolbarVisible(false)
-                self.updateMiniBarVisibility()
-                self.showToast("Barra rápida \(self.miniBarEnabled ? "visible" : "oculta")")
             case "clearCache":
                 self.setToolbarVisible(false)
                 TVWebEngine.clearCacheAndCookies {
@@ -1226,7 +1144,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             self?.finishSavingWebApp(title: alert?.textFields?.first?.text ?? defaultTitle, urlString: urlStr, autoLaunch: false)
             self?.restoreBrowserFocus()
         }
-        let saveAuto = UIAlertAction(title: "Guardar y abrir al iniciar TVBrowser", style: .default) { [weak self, weak alert] _ in
+        let saveAuto = UIAlertAction(title: "Guardar y abrir al iniciar Platanet", style: .default) { [weak self, weak alert] _ in
             self?.finishSavingWebApp(title: alert?.textFields?.first?.text ?? defaultTitle, urlString: urlStr, autoLaunch: true)
             self?.restoreBrowserFocus()
         }
@@ -1258,6 +1176,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private func presentStartPage(createNewTab: Bool = false) {
         let vc = StartPageViewController()
         vc.modalPresentationStyle = .fullScreen
+        vc.currentPageTitle = currentEngine?.currentTitle ?? activeTab?.title
+        vc.currentPageURL = currentEngine?.currentURL ?? activeTab?.url
         vc.onSearchTapped = { [weak self] in
             vc.dismiss(animated: true) {
                 if createNewTab {
@@ -1365,7 +1285,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     @objc private func modeTapped() {
         cursorView.mode = (cursorView.mode == .pointer) ? .scroll : .pointer
         let modeName = cursorView.mode == .pointer ? "Modo Cursor" : "Modo Scroll"
-        updateMiniBarState()
         showToast(modeName)
     }
 
@@ -1562,14 +1481,14 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             }
 
             if cursorView.mode == .pointer {
-                moveCursor(by: CGPoint(x: dx * 1.45, y: dy * 1.45))
+                moveCursor(by: CGPoint(x: dx * 1.20, y: dy * 1.20))
             } else {
-                scrollWebView(by: CGPoint(x: -dx * 1.65, y: -dy * 1.65))
+                scrollWebView(by: CGPoint(x: -dx * 1.05, y: -dy * 1.05))
             }
         case .ended, .cancelled:
             if cursorView.mode == .scroll {
                 let vel = gesture.velocity(in: view)
-                inputController.applyScrollImpulse(velocity: CGPoint(x: -vel.x * 0.9, y: -vel.y * 0.9))
+                inputController.applyScrollImpulse(velocity: CGPoint(x: -vel.x * 0.45, y: -vel.y * 0.45))
             }
             lastPanPoint = .zero
         default:
@@ -1591,6 +1510,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             if presses.contains(where: { $0.type == .menu || $0.type == .playPause }) {
                 return
             }
+            scheduleToolbarAutoHide()
             super.pressesBegan(presses, with: event)
             return
         }
@@ -1612,6 +1532,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 setToolbarVisible(false)
                 return
             }
+            scheduleToolbarAutoHide()
             super.pressesEnded(presses, with: event)
             return
         }
@@ -1635,17 +1556,44 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         let nextY = max(8, min(bounds.height - 8, cursorView.center.y + delta.y))
         cursorView.center = CGPoint(x: nextX, y: nextY)
 
-        let overMiniBar = !miniBarContainer.isHidden && miniBarContainer.frame.insetBy(dx: -16, dy: -10).contains(cursorView.center)
-        if !overMiniBar && nextY <= 18 && delta.y < 0 {
-            scrollWebView(by: CGPoint(x: 0, y: delta.y * 2.8))
-        } else if nextY >= bounds.height - 20 && delta.y > 0 {
-            scrollWebView(by: CGPoint(x: 0, y: delta.y * 2.8))
+        let now = CACurrentMediaTime()
+        let scrollView = currentEngine?.scrollView
+        let topInset = scrollView?.adjustedContentInset.top ?? 0
+        let currentOffsetY = (scrollView?.contentOffset.y ?? 0) + topInset
+        let isAtTop = (currentOffsetY <= 6) && !cachedPageCanScrollUp
+
+        if !isAtTop {
+            lastScrolledDownTime = now
         }
 
-        if updateMiniBarHover(at: cursorView.center) != nil {
-            cursorView.visualHint = .clickable
-            linkPreviewLabel.isHidden = true
+        // Top edge:
+        // - If the page is scrolled down, entering the top band gently scrolls the page back up.
+        // - Once already at the top of the page, pushing against the top edge reveals the big Safari bar.
+        let topEdgeTriggerY: CGFloat = 18
+        let topScrollZoneY: CGFloat = 125
+        if !isAtTop && nextY <= topScrollZoneY && delta.y < 0 {
+            let t = min(1.0, (topScrollZoneY - nextY) / topScrollZoneY)
+            let curve: CGFloat = 0.22 + 0.78 * (t * t)
+            let step = max(-10.5, min(-1.6, delta.y * 0.90 * curve))
+            scrollWebView(by: CGPoint(x: 0, y: step))
+        } else if isAtTop,
+                  nextY <= topEdgeTriggerY,
+                  delta.y < -1.0,
+                  activeTab?.isAppMode != true,
+                  now >= suppressTopEdgeToolbarUntil,
+                  (now - lastScrolledDownTime) >= 0.25 {
+            setToolbarVisible(true)
             return
+        }
+
+        // Bottom edge: start gentle progressive scrolling ~150pt before the bottom so stopping is precise.
+        let bottomZoneSpan: CGFloat = 150
+        let bottomZoneStart = bounds.height - bottomZoneSpan
+        if nextY >= bottomZoneStart && delta.y > 0 {
+            let t = min(1.0, (nextY - bottomZoneStart) / bottomZoneSpan)
+            let curve: CGFloat = 0.22 + 0.78 * (t * t)
+            let step = min(10.5, max(1.6, delta.y * 0.90 * curve))
+            scrollWebView(by: CGPoint(x: 0, y: step))
         }
 
         scheduleHoverUpdate()
@@ -1670,11 +1618,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     private func performHoverProbeAtCursor() {
         guard let engine = currentEngine, cursorView.mode == .pointer, !toolbarVisible else { return }
-        if updateMiniBarHover(at: cursorView.center) != nil {
-            cursorView.visualHint = .clickable
-            linkPreviewLabel.isHidden = true
-            return
-        }
         let pt = cursorView.center
         let viewW = max(1, view.bounds.width)
         let viewH = max(1, view.bounds.height)
@@ -1744,14 +1687,23 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                          !!el.isContentEditable;
             var link = tvClosest(el, 'a[href]');
             var clickable = link || tvClosest(el, 'a, button, select, label, summary, details, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [onclick], [tabindex]');
-            if (!clickable) {
-                var cur = el;
-                for (var i = 0; i < 4 && cur; i++) {
-                    try {
-                        if (getComputedStyle(cur).cursor === 'pointer') { clickable = cur; break; }
-                    } catch (e) {}
-                    cur = cur.parentElement;
-                }
+            var hasInnerScroll = false;
+            var canScrollUp = (window.scrollY || document.documentElement.scrollTop || 0) > 4;
+            var cur = el;
+            for (var i = 0; cur && cur !== doc.body && cur !== doc.documentElement; i++) {
+                try {
+                    var st = getComputedStyle(cur);
+                    if (!clickable && i < 4 && st.cursor === 'pointer') {
+                        clickable = cur;
+                    }
+                    var canY = (st.overflowY === 'auto' || st.overflowY === 'scroll') && cur.scrollHeight > cur.clientHeight + 2;
+                    var canX = (st.overflowX === 'auto' || st.overflowX === 'scroll') && cur.scrollWidth > cur.clientWidth + 2;
+                    if (canY || canX) {
+                        hasInnerScroll = true;
+                        if (canY && cur.scrollTop > 4) canScrollUp = true;
+                    }
+                } catch (e) {}
+                cur = cur.parentElement;
             }
             var href = null;
             if (link && link.href) {
@@ -1760,7 +1712,9 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             }
             return JSON.stringify({
                 hint: isText ? 'text' : (clickable ? 'clickable' : 'normal'),
-                href: href
+                href: href,
+                hasInnerScroll: hasInnerScroll,
+                canScrollUp: canScrollUp
             });
         })();
         """
@@ -1774,7 +1728,11 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             }
             let hintStr = obj["hint"] as? String ?? "normal"
             let hint: CursorVisualHint = hintStr == "text" ? .textInput : (hintStr == "clickable" ? .clickable : .normal)
+            let hasInner = obj["hasInnerScroll"] as? Bool ?? false
+            let canUp = obj["canScrollUp"] as? Bool ?? false
             DispatchQueue.main.async {
+                self.cachedCursorOverInnerScroll = hasInner
+                self.cachedPageCanScrollUp = canUp
                 self.cursorView.visualHint = hint
                 if let href = obj["href"] as? String, !href.isEmpty {
                     self.linkPreviewLabel.text = "  \(href)  "
@@ -1788,8 +1746,31 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     private func scrollWebView(by delta: CGPoint) {
         guard let engine = currentEngine else { return }
-        pendingScrollDelta.x += delta.x
-        pendingScrollDelta.y += delta.y
+        let zoom = max(0.75, CGFloat(activeTab?.zoom ?? BrowserStore.shared.pageZoom))
+        let scaledDX = delta.x / zoom
+        let scaledDY = delta.y / zoom
+
+        if !cachedCursorOverInnerScroll {
+            let sv = engine.scrollView
+            let minX = -sv.adjustedContentInset.left
+            let minY = -sv.adjustedContentInset.top
+            let maxX = max(minX, sv.contentSize.width - sv.bounds.width + sv.adjustedContentInset.right)
+            let maxY = max(minY, sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
+
+            if maxY > minY + 1 || maxX > minX + 1 {
+                let targetX = max(minX, min(maxX, sv.contentOffset.x + scaledDX))
+                let targetY = max(minY, min(maxY, sv.contentOffset.y + scaledDY))
+                let movedX = abs(targetX - sv.contentOffset.x) > 0.05
+                let movedY = abs(targetY - sv.contentOffset.y) > 0.05
+                if movedX || movedY {
+                    sv.setContentOffset(CGPoint(x: targetX, y: targetY), animated: false)
+                    return
+                }
+            }
+        }
+
+        pendingScrollDelta.x += scaledDX
+        pendingScrollDelta.y += scaledDY
 
         if !innerScrollInFlight {
             flushScrollDelta(using: engine)
@@ -1825,19 +1806,29 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                     var beforeY = el.scrollTop, beforeX = el.scrollLeft;
                     if (canY) el.scrollTop += \(dy);
                     if (canX) el.scrollLeft += \(dx);
-                    if (el.scrollTop !== beforeY || el.scrollLeft !== beforeX) return true;
+                    if (el.scrollTop !== beforeY || el.scrollLeft !== beforeX) {
+                        return JSON.stringify({ handled: true, canUp: el.scrollTop > 4 });
+                    }
                 }
                 el = el.parentElement;
             }
-            return false;
+            var docCanUp = (window.scrollY || document.documentElement.scrollTop || 0) > 4;
+            return JSON.stringify({ handled: false, canUp: docCanUp });
         })();
         """
 
-        engine.evaluateJavaScript(js) { [weak self, weak engine] handled, _ in
+        engine.evaluateJavaScript(js) { [weak self, weak engine] result, _ in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.innerScrollInFlight = false
-                if (handled as? Bool) != true {
+                var handled = false
+                if let jsonStr = result as? String,
+                   let data = jsonStr.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    handled = (obj["handled"] as? Bool) ?? false
+                    self.cachedPageCanScrollUp = (obj["canUp"] as? Bool) ?? false
+                }
+                if !handled {
                     if let scrollView = engine?.scrollView,
                        (scrollView.contentSize.height > scrollView.bounds.height + 2 ||
                         scrollView.contentSize.width > scrollView.bounds.width + 2) {
@@ -1860,21 +1851,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     }
 
     private func performClickAtCursor() {
-        if let chip = updateMiniBarHover(at: cursorView.center) {
-            cursorView.animateClick()
-            if chip === miniBackChip {
-                backTapped()
-            } else if chip === miniURLChip {
-                urlTapped()
-            } else if chip === miniModeChip {
-                modeTapped()
-            } else if chip === miniZoomChip {
-                presentZoomPresetPicker()
-            } else if chip === miniToolbarChip {
-                setToolbarVisible(true)
-            }
-            return
-        }
         guard let engine = currentEngine else { return }
         cursorView.animateClick()
         let pt = cursorView.center
@@ -2368,7 +2344,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         </head>
         <body>
             <div class="box">
-                <h1>TVBrowser no puede abrir \(safeHost)</h1>
+                <h1>Platanet no puede abrir \(safeHost)</h1>
                 <p>\(desc)</p>
                 <a class="btn" href="tvbrowser://retry">Reintentar</a>
             </div>
@@ -2385,7 +2361,7 @@ extension BrowserViewController: InputControllerDelegate {
     func inputControllerDidMoveCursor(delta: CGPoint) {
         guard !toolbarVisible, presentedViewController == nil else { return }
         if cursorView.mode == .scroll {
-            scrollWebView(by: CGPoint(x: delta.x * 1.5, y: delta.y * 1.5))
+            scrollWebView(by: CGPoint(x: delta.x * 0.85, y: delta.y * 0.85))
         } else {
             moveCursor(by: delta)
         }
@@ -2548,6 +2524,8 @@ extension BrowserViewController: TVWebEngineDelegate {
         tab.isLoading = true
         if tab === activeTab {
             isWebInputFocused = false
+            cachedCursorOverInnerScroll = false
+            cachedPageCanScrollUp = false
             updateProgressUI()
             updateToolbarState()
         }

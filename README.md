@@ -1,42 +1,43 @@
-# TVBrowser para Apple TV 4K (tvOS) · Safari Edition (v2.0)
+# Platanet para Apple TV 4K (tvOS) · v2.1
 
-Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la experiencia de **Safari** al televisor: barra compacta, Página de Inicio nativa, pestañas múltiples, **WebApps en pantalla completa**, soporte de **teclado Bluetooth**, **control remoto desde móvil/PC con ratón y trackpad en tiempo real**, reproductor de vídeo nativo y bloqueador de anuncios.
+Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la experiencia de **Safari** al televisor: barra superior automática al llegar arriba (y ocultación automática tras inactividad), zoom nativo centrado (`140%` por defecto para TV 55"), Página de Inicio con gestión completa de accesos directos, pestañas múltiples, **WebApps en pantalla completa**, soporte de **teclado Bluetooth**, **control remoto desde iPhone/PC con ratón, trackpad y pellizco**, reproductor de vídeo nativo y bloqueador de anuncios.
 
 ---
 
-## Novedades principales (v2.0)
+## Novedades principales (v2.1)
 
-* **Interfaz estilo Safari sin estorbos:**
-  * Barra superior compacta (`◀`, `▶`, `⌂ Inicio`, barra de búsqueda/URL con dominio SSL, `↻/✕`, `★`, `📺 Vídeo`, `❏ Pestañas`, `⋯ Opciones`) y barra de progreso fina azul.
-  * **Arranque directo en Google** (o en tu **WebApp automática** si fijas una) + **Página de Inicio nativa (`⌂`)** navegable con la cruceta del mando con WebApps, Favoritos y Visitados recientemente.
-  * Eliminada la barra fija inferior que tapaba subtítulos y reproductores (sustituida por avisos breves automáticos de 1,5 s y vista previa de enlace abajo a la izquierda).
-* **Control de cursor y scroll reparado de raíz:**
-  * **Play/Pausa (toque corto)** alterna `Modo Cursor ↔ Modo Scroll` de forma fiable (corregido el antiguo doble disparo).
+* **Interfaz estilo Safari inteligente y despejada:**
+  * Sin barra fija estorbando durante la navegación: al llevar el puntero arriba del todo estando en la parte superior de la página se despliega la barra grande de Safari (`◀`, `▶`, `⌂ Inicio`, búsqueda/URL con dominio SSL, `A-` / `%` / `A+`, `↻/✕`, `★`, `📺 Vídeo`, `❏ Pestañas`, `⋯ Menú`, `Listo`), y desaparece automáticamente tras ~6,5 s sin usarla.
+  * **Zoom nativo siempre centrado (75% – 250%, `140%` por defecto para TV 55"):** escala todo el viewport manteniendo cualquier página centrada sin descuadres laterales.
+  * **Scroll progresivo y suave:** al acercar el puntero al borde inferior/superior la página avanza progresivamente con suavidad a 60 fps para parar en el punto exacto sin saltos bruscos.
+  * **Página de Inicio (`⌂`):** añade accesos directos de la página actual o por URL, edítalos, reordénalos o elimínalos fácilmente desde **+ Añadir acceso** y **Editar accesos**.
+  * **Arranque directo en Google** (o en tu **WebApp automática** si fijas una) + barra de progreso fina azul.
+* **Control de cursor y scroll:**
+  * **Play/Pausa (toque corto)** alterna `Modo Cursor ↔ Modo Scroll` de forma fiable.
+  * **Mantener pulsado Seleccionar / OK (≥ 0,6 s)** abre el menú rápido del mando desde cualquier punto de la página.
   * **Pulsación larga en Play/Pausa o Menú (≥ 0,45 s)** abre o cierra la barra Safari **en cualquier momento**, aunque tengas historial abierto.
-  * **Scroll con inercia suave** y soporte prioritario de **contenedores internos (`overflow: auto/scroll`)**.
-  * **Cursor adaptativo con `:hover` en tiempo real** (cambia al pasar sobre enlaces o cajas de texto y muestra la URL destino).
-  * **Soporte nativo de `<select>` desplegables** (menú nativo de tvOS), soporte recursivo dentro de **`<iframe>`s** del mismo origen y clic estabilizado al soltar.
+  * **Cursor adaptativo con `:hover` en tiempo real**, soporte nativo de `<select>` desplegables, `<iframe>`s / Shadow DOM y clic estabilizado al soltar.
 * **WebApps (Modo App en pantalla completa):**
-  * Convierte cualquier web en una **WebApp** desde `⋯ → Guardar como WebApp` (sin barras, con su propio Zoom, User-Agent y AdBlock, y opción de **auto-abrir al arrancar TVBrowser**).
+  * Convierte cualquier web en una **WebApp** desde `⋯ → Guardar como WebApp` (sin barras, con su propio Zoom, User-Agent y AdBlock, y opción de **auto-abrir al arrancar Platanet**).
 * **Pestañas y Motor WebKit robusto:**
   * **Gestor de pestañas (`❏`)** con soporte real de `target="_blank"` y pop-ups OAuth (Google, Microsoft, GitHub) conservando `window.opener`.
-  * Observación KVO en tiempo real de URL, título y progreso para **SPAs modernas** (YouTube, Google, GitHub, etc.), diálogos JS (`alert`, `confirm`, `prompt`), página de error con botón *Reintentar*, selector de **User-Agent (Mac / iPad / iPhone)**, limpieza de caché/cookies y regla de bloqueo nativo (`WKContentRuleList`).
+  * Observación KVO en tiempo real de URL, título y progreso para **SPAs modernas**, diálogos JS, página de error con *Reintentar*, selector de **User-Agent (Mac / iPad / iPhone)**, limpieza de caché/cookies y regla de bloqueo nativo (`WKContentRuleList`).
   * **Reproductor de vídeo TV (`AVPlayerViewController`)** para reproducir flujos `<video>` MP4 / HLS a pantalla completa con el Siri Remote.
 * **Teclado Bluetooth y Ratón / Trackpad Remoto (PWA + WebSocket):**
-  * **Teclado Bluetooth:** escritura directa en cualquier campo web enfocado sin popup modal + atajos Safari (`⌘L`, `⌘T`, `⌘W`, `⌘R`, `⌘[`, `⌘]`, `⌘+`/`⌘-`/`⌘0`, `Esc`, `Espacio`, `RePág`/`AvPág`).
-  * **Ratón y Trackpad Remoto en tu red Wi-Fi:** abre `⋯ → Control Remoto (Ratón/Teclado/QR)` y escanea el código QR desde tu **iPhone, iPad, Mac o PC** (instalable como WebApp PWA). Incluye trackpad táctil, **Modo Ratón PC (Pointer Lock)**, scroll con rueda o dos dedos, teclado en directo y exportación/importación de marcadores HTML/JSON y contraseñas CSV. *(También incluye soporte de `GCMouse` para dispositivos HID compatibles.)*
+  * **Teclado Bluetooth:** escritura directa en cualquier campo web enfocado + atajos Safari (`⌘L`, `⌘T`, `⌘W`, `⌘R`, `⌘[`, `⌘]`, `⌘+`/`⌘-`/`⌘0`, `Esc`, `Espacio`, `RePág`/`AvPág`).
+  * **Ratón, Trackpad y Gestos desde iPhone/PC:** abre `⋯ → Control Remoto QR` y escanea el QR desde tu **iPhone, iPad, Mac o PC** (con reconexión automática, Wake Lock, teclado en directo, pellizco de 2 dedos para zoom, y exportación/importación de marcadores HTML/JSON y contraseñas CSV). *(También incluye soporte de `GCMouse` para dispositivos HID compatibles.)*
 
 ---
 
 ## Controles
 
 ### Siri Remote / Mando de TV compatible / Mando iPhone
-* **Barra rápida superior siempre accesible (`◀` · `🔍 Buscar/URL` · `🎯 Cursor/Scroll` · `100%` · `☰ Menú`):** Mueve el puntero arriba del todo y pulsa **OK/Seleccionar** para abrir la barra de direcciones, cambiar de modo, ajustar la escala del televisor o abrir la barra completa de Safari sin memorizar atajos.
+* **Subir el puntero arriba del todo (en la parte superior de la web):** Despliega automáticamente la barra completa de Safari (se oculta sola al cabo de unos segundos si no la usas). Si estás a mitad de la página y subes el puntero, primero hará scroll suave hacia arriba.
 * **Mantener pulsado Seleccionar / OK (≥ 0,6 s):** Abre el **Menú rápido del mando** desde cualquier punto de la página (Buscar/URL, Barra completa, Escala/Zoom, Cursor/Scroll, Inicio, Pestañas, Control Remoto iPhone).
-* **Deslizar en el touchpad o cruceta (D-Pad):** Mueve el cursor virtual (en *Modo Cursor*) o hace scroll con inercia (en *Modo Scroll*). Al llevar el puntero al borde inferior/superior de la pantalla hace scroll automático.
+* **Deslizar en el touchpad o cruceta (D-Pad):** Mueve el cursor virtual (en *Modo Cursor*) o hace scroll suave (en *Modo Scroll*). Acerca el puntero hacia el borde inferior/superior para desplazarte suavemente por la página.
 * **Play / Pausa (toque corto):** Alterna entre **Modo Cursor** y **Modo Scroll**.
 * **Menú (toque corto):** Atrás en el historial (o cierra la pestaña secundaria); en la pantalla raíz sin historial sale al menú principal de Apple TV.
-* **Play / Pausa (pulsación larga ≥ 0,45 s) o Menú largo:** Abre o cierra la **barra Safari** desde cualquier página o WebApp.
+* **Play / Pausa (pulsación larga ≥ 0,45 s):** Abre o cierra manualmente la **barra Safari** desde cualquier página o WebApp.
 
 ### Teclado Bluetooth físico
 * **Escribir directamente** cuando un campo de texto web está enfocado (incluye `Backspace`, `Enter`, `Tab`, `Esc`).
@@ -68,4 +69,4 @@ Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la
 3. Empareja tu Apple TV 4K (*Ajustes → Mandos y dispositivos → App Remote y dispositivos*).
 4. Arrastra `TVBrowser-tvOS.ipa` a Sideloadly, introduce tu Apple ID y pulsa **Start**.
 
-> **Nota técnica:** Apple no incluye `WebKit` en el SDK público de tvOS para la App Store, por lo que TVBrowser carga `WebKit` dinámicamente en tiempo de ejecución para funcionar mediante sideloading (`.ipa`). Asimismo, tvOS restringe el emparejamiento de ratones Bluetooth genéricos en Ajustes del sistema, razón por la cual TVBrowser incorpora su propia WebApp local de ratón/trackpad por Wi-Fi además del hook `GCMouse`.
+> **Nota técnica:** Apple no incluye `WebKit` en el SDK público de tvOS para la App Store, por lo que Platanet carga `WebKit` dinámicamente en tiempo de ejecución para funcionar mediante sideloading (`.ipa`). Asimismo, tvOS restringe el emparejamiento de ratones Bluetooth genéricos en Ajustes del sistema, razón por la cual Platanet incorpora su propia WebApp local de ratón/trackpad por Wi-Fi además del hook `GCMouse`.

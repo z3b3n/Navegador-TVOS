@@ -456,8 +456,8 @@ final class LocalExportServer {
     private func manifestJSON() -> String {
         """
         {
-          "name": "TVBrowser Mando",
-          "short_name": "TVBrowser",
+          "name": "Platanet Mando",
+          "short_name": "Platanet",
           "start_url": "/",
           "display": "standalone",
           "background_color": "#0b1120",
@@ -476,7 +476,7 @@ final class LocalExportServer {
             <meta name="apple-mobile-web-app-capable" content="yes">
             <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
             <link rel="manifest" href="/manifest.json">
-            <title>TVBrowser · Mando, Ratón y Teclado</title>
+            <title>Platanet · Mando, Ratón y Teclado</title>
             <style>
                 :root { color-scheme: dark; }
                 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -518,7 +518,7 @@ final class LocalExportServer {
         </head>
         <body>
             <header>
-                <h1>TVBrowser · Control Remoto</h1>
+                <h1>Platanet · Control Remoto</h1>
                 <button id="status" class="badge" style="border:0;cursor:pointer;" onclick="forceReconnectWS()">Conectando...</button>
             </header>
 

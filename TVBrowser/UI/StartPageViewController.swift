@@ -6,6 +6,9 @@ final class StartPageViewController: UIViewController {
     var onSelectWebApp: ((WebAppItem) -> Void)?
     var onClose: (() -> Void)?
 
+    var currentPageTitle: String?
+    var currentPageURL: URL?
+
     private enum Section: Int {
         case webApps
         case favorites
@@ -13,9 +16,13 @@ final class StartPageViewController: UIViewController {
     }
 
     private var activeSections: [Section] = []
+    private var isEditingShortcuts = false
     private var collectionView: UICollectionView!
     private let searchBarButton = UIButton(type: .custom)
+    private let addShortcutButton = UIButton(type: .custom)
+    private let editShortcutsButton = UIButton(type: .custom)
     private let closeButton = UIButton(type: .custom)
+    private let headerButtonsStack = UIStackView()
     private let topFocusGuide = UIFocusGuide()
     private let gridFocusGuide = UIFocusGuide()
 
@@ -31,42 +38,48 @@ final class StartPageViewController: UIViewController {
         setupCollectionView()
         setupFocusGuides()
 
-        let menuTap = UITapGestureRecognizer(target: self, action: #selector(closeTapped))
+        let menuTap = UITapGestureRecognizer(target: self, action: #selector(menuButtonPressed))
         menuTap.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
         view.addGestureRecognizer(menuTap)
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        reloadStartPageData()
+    }
+
+    private func reloadStartPageData() {
         rebuildSections()
+        updateEditButtonAppearance()
         collectionView.reloadData()
     }
 
     private func rebuildSections() {
         var next: [Section] = []
         if !BrowserStore.shared.webApps.isEmpty { next.append(.webApps) }
-        if !BrowserStore.shared.bookmarks.isEmpty { next.append(.favorites) }
+        next.append(.favorites)
         if !recentItems().isEmpty { next.append(.recent) }
         activeSections = next
     }
 
     private func setupHeader() {
         let titleLabel = UILabel()
-        titleLabel.text = "TVBrowser · Inicio"
+        titleLabel.text = "Platanet · Inicio"
         titleLabel.font = .systemFont(ofSize: 38, weight: .bold)
         titleLabel.textColor = .white
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(titleLabel)
 
-        closeButton.setTitle("Volver al navegador", for: .normal)
-        closeButton.titleLabel?.font = .systemFont(ofSize: 24, weight: .semibold)
-        closeButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 26, bottom: 12, right: 26)
-        closeButton.layer.cornerRadius = 14
-        closeButton.backgroundColor = UIColor.white.withAlphaComponent(0.14)
-        closeButton.setTitleColor(.white, for: .normal)
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .primaryActionTriggered)
-        view.addSubview(closeButton)
+        configureHeaderButton(addShortcutButton, title: "+ Añadir acceso", tint: UIColor.systemBlue.withAlphaComponent(0.55), action: #selector(addShortcutTapped))
+        configureHeaderButton(editShortcutsButton, title: "Editar", tint: UIColor.white.withAlphaComponent(0.14), action: #selector(toggleEditTapped))
+        configureHeaderButton(closeButton, title: "Volver al navegador", tint: UIColor.white.withAlphaComponent(0.14), action: #selector(closeTapped))
+
+        headerButtonsStack.axis = .horizontal
+        headerButtonsStack.spacing = 14
+        headerButtonsStack.alignment = .center
+        headerButtonsStack.translatesAutoresizingMaskIntoConstraints = false
+        [addShortcutButton, editShortcutsButton, closeButton].forEach { headerButtonsStack.addArrangedSubview($0) }
+        view.addSubview(headerButtonsStack)
 
         searchBarButton.setTitle("🔍   Buscar en \(BrowserStore.shared.searchEngine.displayName) o escribir dirección web...", for: .normal)
         searchBarButton.titleLabel?.font = .systemFont(ofSize: 28, weight: .medium)
@@ -85,14 +98,44 @@ final class StartPageViewController: UIViewController {
             titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 28),
             titleLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 60),
 
-            closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -60),
+            headerButtonsStack.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            headerButtonsStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -60),
 
             searchBarButton.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 24),
             searchBarButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             searchBarButton.widthAnchor.constraint(equalToConstant: 1180),
             searchBarButton.heightAnchor.constraint(equalToConstant: 78)
         ])
+    }
+
+    private func configureHeaderButton(_ button: UIButton, title: String, tint: UIColor, action: Selector) {
+        button.setTitle(title, for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 22, weight: .semibold)
+        button.contentEdgeInsets = UIEdgeInsets(top: 12, left: 22, bottom: 12, right: 22)
+        button.layer.cornerRadius = 14
+        button.backgroundColor = tint
+        button.setTitleColor(.white, for: .normal)
+        button.addTarget(self, action: action, for: .primaryActionTriggered)
+    }
+
+    private func headerButtonDefaultBackground(_ button: UIButton) -> UIColor {
+        if button === addShortcutButton {
+            return UIColor.systemBlue.withAlphaComponent(0.55)
+        }
+        if button === editShortcutsButton && isEditingShortcuts {
+            return UIColor.systemRed.withAlphaComponent(0.75)
+        }
+        if button === searchBarButton {
+            return UIColor.white.withAlphaComponent(0.12)
+        }
+        return UIColor.white.withAlphaComponent(0.14)
+    }
+
+    private func updateEditButtonAppearance() {
+        editShortcutsButton.setTitle(isEditingShortcuts ? "✓ Listo" : "Editar accesos", for: .normal)
+        if !editShortcutsButton.isFocused {
+            editShortcutsButton.backgroundColor = headerButtonDefaultBackground(editShortcutsButton)
+        }
     }
 
     private func setupCollectionView() {
@@ -142,11 +185,11 @@ final class StartPageViewController: UIViewController {
 
     private func setupFocusGuides() {
         view.addLayoutGuide(topFocusGuide)
-        topFocusGuide.preferredFocusEnvironments = [closeButton]
+        topFocusGuide.preferredFocusEnvironments = [addShortcutButton]
         NSLayoutConstraint.activate([
             topFocusGuide.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             topFocusGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topFocusGuide.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor),
+            topFocusGuide.trailingAnchor.constraint(equalTo: headerButtonsStack.leadingAnchor),
             topFocusGuide.bottomAnchor.constraint(equalTo: searchBarButton.topAnchor)
         ])
 
@@ -163,14 +206,14 @@ final class StartPageViewController: UIViewController {
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
         super.didUpdateFocus(in: context, with: coordinator)
         coordinator.addCoordinatedAnimations({
-            for btn in [self.searchBarButton, self.closeButton] {
+            for btn in [self.searchBarButton, self.addShortcutButton, self.editShortcutsButton, self.closeButton] {
                 if context.nextFocusedView === btn {
-                    btn.transform = CGAffineTransform(scaleX: 1.03, y: 1.03)
+                    btn.transform = CGAffineTransform(scaleX: 1.04, y: 1.04)
                     btn.backgroundColor = .white
                     btn.setTitleColor(.black, for: .normal)
                 } else if context.previouslyFocusedView === btn {
                     btn.transform = .identity
-                    btn.backgroundColor = UIColor.white.withAlphaComponent(btn === self.searchBarButton ? 0.12 : 0.14)
+                    btn.backgroundColor = self.headerButtonDefaultBackground(btn)
                     btn.setTitleColor(.white, for: .normal)
                 }
             }
@@ -179,6 +222,24 @@ final class StartPageViewController: UIViewController {
 
     @objc private func searchTapped() {
         onSearchTapped?()
+    }
+
+    @objc private func addShortcutTapped() {
+        presentAddShortcutMenu()
+    }
+
+    @objc private func toggleEditTapped() {
+        isEditingShortcuts.toggle()
+        reloadStartPageData()
+    }
+
+    @objc private func menuButtonPressed() {
+        if isEditingShortcuts {
+            isEditingShortcuts = false
+            reloadStartPageData()
+        } else {
+            onClose?()
+        }
     }
 
     @objc private func closeTapped() {
@@ -191,56 +252,183 @@ final class StartPageViewController: UIViewController {
               let indexPath = collectionView.indexPath(for: focusedCell),
               activeSections.indices.contains(indexPath.section) else { return }
 
+        presentOptionsForItem(at: indexPath)
+    }
+
+    private func presentOptionsForItem(at indexPath: IndexPath) {
+        guard activeSections.indices.contains(indexPath.section) else { return }
         switch activeSections[indexPath.section] {
         case .webApps:
-            let app = BrowserStore.shared.webApps[indexPath.item]
-            let alert = UIAlertController(title: app.title, message: app.urlString, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Abrir WebApp", style: .default) { [weak self] _ in
-                self?.onSelectWebApp?(app)
-            })
-            let autoTitle = app.autoLaunch ? "Quitar inicio automático" : "Abrir automáticamente al iniciar TVBrowser"
-            alert.addAction(UIAlertAction(title: autoTitle, style: .default) { [weak self] _ in
-                BrowserStore.shared.toggleAutoLaunch(webAppID: app.id)
-                self?.rebuildSections()
-                self?.collectionView.reloadData()
-            })
-            alert.addAction(UIAlertAction(title: "Eliminar WebApp", style: .destructive) { [weak self] _ in
-                BrowserStore.shared.removeWebApp(id: app.id)
-                self?.rebuildSections()
-                self?.collectionView.reloadData()
-            })
-            alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
-            present(alert, animated: true)
-
+            presentWebAppOptions(at: indexPath.item)
         case .favorites:
-            let bm = BrowserStore.shared.bookmarks[indexPath.item]
-            let alert = UIAlertController(title: bm.title, message: bm.urlString, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Abrir", style: .default) { [weak self] _ in
-                if let url = URL(string: bm.urlString) { self?.onSelectURL?(url) }
+            if indexPath.item >= BrowserStore.shared.bookmarks.count {
+                presentAddShortcutMenu()
+            } else {
+                presentFavoriteOptions(at: indexPath.item)
+            }
+        case .recent:
+            let recents = recentItems()
+            guard recents.indices.contains(indexPath.item) else { return }
+            let hist = recents[indexPath.item]
+            let alert = UIAlertController(title: hist.title, message: hist.urlString, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Abrir página", style: .default) { [weak self] _ in
+                if let url = URL(string: hist.urlString) { self?.onSelectURL?(url) }
             })
-            alert.addAction(UIAlertAction(title: "Guardar como WebApp (Pantalla completa)", style: .default) { [weak self] _ in
-                _ = BrowserStore.shared.saveWebApp(
-                    title: bm.title,
-                    urlString: bm.urlString,
-                    userAgentMode: BrowserStore.shared.defaultUserAgentMode,
-                    zoom: BrowserStore.shared.pageZoom,
-                    adBlockEnabled: AdBlocker.shared.isEnabled,
-                    autoLaunch: false
-                )
-                self?.rebuildSections()
-                self?.collectionView.reloadData()
-            })
-            alert.addAction(UIAlertAction(title: "Eliminar favorito", style: .destructive) { [weak self] _ in
-                BrowserStore.shared.removeBookmark(at: indexPath.item)
-                self?.rebuildSections()
-                self?.collectionView.reloadData()
+            alert.addAction(UIAlertAction(title: "★ Añadir a Favoritos", style: .default) { [weak self] _ in
+                BrowserStore.shared.addBookmark(title: hist.title, urlString: hist.urlString)
+                self?.reloadStartPageData()
             })
             alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
             present(alert, animated: true)
-
-        case .recent:
-            break
         }
+    }
+
+    private func presentWebAppOptions(at index: Int) {
+        guard BrowserStore.shared.webApps.indices.contains(index) else { return }
+        let app = BrowserStore.shared.webApps[index]
+        let alert = UIAlertController(title: app.title, message: app.urlString, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Abrir WebApp", style: .default) { [weak self] _ in
+            self?.onSelectWebApp?(app)
+        })
+        let autoTitle = app.autoLaunch ? "Quitar inicio automático" : "Abrir automáticamente al iniciar Platanet"
+        alert.addAction(UIAlertAction(title: autoTitle, style: .default) { [weak self] _ in
+            BrowserStore.shared.toggleAutoLaunch(webAppID: app.id)
+            self?.reloadStartPageData()
+        })
+        alert.addAction(UIAlertAction(title: "✕ Eliminar WebApp", style: .destructive) { [weak self] _ in
+            BrowserStore.shared.removeWebApp(id: app.id)
+            self?.reloadStartPageData()
+        })
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func presentFavoriteOptions(at index: Int) {
+        guard BrowserStore.shared.bookmarks.indices.contains(index) else { return }
+        let bm = BrowserStore.shared.bookmarks[index]
+        let alert = UIAlertController(title: bm.title, message: bm.urlString, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "↗ Abrir página", style: .default) { [weak self] _ in
+            if let url = URL(string: bm.urlString) { self?.onSelectURL?(url) }
+        })
+        alert.addAction(UIAlertAction(title: "✎ Editar nombre o URL", style: .default) { [weak self] _ in
+            self?.presentBookmarkEditor(editingIndex: index, initialTitle: bm.title, initialURL: bm.urlString)
+        })
+        if index > 0 {
+            alert.addAction(UIAlertAction(title: "⬆ Mover al principio", style: .default) { [weak self] _ in
+                BrowserStore.shared.moveBookmarkToFront(at: index)
+                self?.reloadStartPageData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "⊞ Guardar como WebApp (Pantalla completa)", style: .default) { [weak self] _ in
+            _ = BrowserStore.shared.saveWebApp(
+                title: bm.title,
+                urlString: bm.urlString,
+                userAgentMode: BrowserStore.shared.defaultUserAgentMode,
+                zoom: BrowserStore.shared.pageZoom,
+                adBlockEnabled: AdBlocker.shared.isEnabled,
+                autoLaunch: false
+            )
+            self?.reloadStartPageData()
+        })
+        alert.addAction(UIAlertAction(title: "✕ Eliminar favorito", style: .destructive) { [weak self] _ in
+            BrowserStore.shared.removeBookmark(at: index)
+            self?.reloadStartPageData()
+        })
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func presentAddShortcutMenu() {
+        let alert = UIAlertController(
+            title: "Añadir acceso directo",
+            message: "Guarda una página en Favoritos para abrirla con un clic desde Inicio.",
+            preferredStyle: .alert
+        )
+
+        if let currentURL = currentPageURL,
+           let scheme = currentURL.scheme?.lowercased(),
+           (scheme == "http" || scheme == "https") {
+            let host = currentURL.host?.replacingOccurrences(of: "www.", with: "") ?? currentURL.absoluteString
+            let suggestedTitle = (currentPageTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                ? (currentPageTitle ?? host)
+                : host
+            alert.addAction(UIAlertAction(title: "★ Añadir página actual (\(host))", style: .default) { [weak self] _ in
+                BrowserStore.shared.addBookmark(title: suggestedTitle, urlString: currentURL.absoluteString)
+                self?.reloadStartPageData()
+            })
+        }
+
+        alert.addAction(UIAlertAction(title: "✎ Escribir nombre y URL...", style: .default) { [weak self] _ in
+            self?.presentBookmarkEditor(editingIndex: nil, initialTitle: "", initialURL: "https://")
+        })
+
+        let recents = recentItems()
+        if !recents.isEmpty {
+            alert.addAction(UIAlertAction(title: "🕒 Elegir de visitados recientemente...", style: .default) { [weak self] _ in
+                self?.presentRecentToBookmarkPicker(items: recents)
+            })
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func presentRecentToBookmarkPicker(items: [HistoryItem]) {
+        let alert = UIAlertController(
+            title: "Añadir desde historial reciente",
+            message: "Pulsa una página para fijarla en Favoritos.",
+            preferredStyle: .alert
+        )
+        for item in items.prefix(8) {
+            let host = URL(string: item.urlString)?.host?.replacingOccurrences(of: "www.", with: "") ?? item.urlString
+            let label = item.title.isEmpty ? host : "\(item.title) (\(host))"
+            alert.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
+                BrowserStore.shared.addBookmark(title: item.title.isEmpty ? host : item.title, urlString: item.urlString)
+                self?.reloadStartPageData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Volver", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func presentBookmarkEditor(editingIndex: Int?, initialTitle: String, initialURL: String) {
+        let isEditing = (editingIndex != nil)
+        let alert = UIAlertController(
+            title: isEditing ? "Editar acceso directo" : "Nuevo acceso directo",
+            message: "Introduce el nombre visible y la dirección web.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { tf in
+            tf.placeholder = "Nombre (ej. YouTube, Marca, Netflix...)"
+            tf.text = initialTitle
+            tf.autocapitalizationType = .words
+        }
+        alert.addTextField { tf in
+            tf.placeholder = "https://www.ejemplo.com"
+            tf.text = initialURL
+            tf.keyboardType = .URL
+            tf.autocorrectionType = .no
+            tf.autocapitalizationType = .none
+        }
+        alert.addAction(UIAlertAction(title: "Guardar", style: .default) { [weak self, weak alert] _ in
+            guard let self = self, let fields = alert?.textFields else { return }
+            let rawTitle = fields[0].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var rawURL = fields[1].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !rawURL.isEmpty, rawURL != "https://", rawURL != "http://" else { return }
+            if !rawURL.lowercased().hasPrefix("http://") && !rawURL.lowercased().hasPrefix("https://") {
+                rawURL = "https://" + rawURL
+            }
+            let hostFallback = URL(string: rawURL)?.host?.replacingOccurrences(of: "www.", with: "") ?? rawURL
+            let finalTitle = rawTitle.isEmpty ? hostFallback : rawTitle
+            if let idx = editingIndex {
+                BrowserStore.shared.updateBookmark(at: idx, title: finalTitle, urlString: rawURL)
+            } else {
+                BrowserStore.shared.addBookmark(title: finalTitle, urlString: rawURL)
+            }
+            self.reloadStartPageData()
+        })
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        present(alert, animated: true)
     }
 
     private func recentItems() -> [HistoryItem] {
@@ -256,7 +444,7 @@ extension StartPageViewController: UICollectionViewDataSource, UICollectionViewD
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         switch activeSections[section] {
         case .webApps: return BrowserStore.shared.webApps.count
-        case .favorites: return BrowserStore.shared.bookmarks.count
+        case .favorites: return BrowserStore.shared.bookmarks.count + 1
         case .recent: return recentItems().count
         }
     }
@@ -265,11 +453,15 @@ extension StartPageViewController: UICollectionViewDataSource, UICollectionViewD
         let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: StartPageHeaderView.reuseId, for: indexPath) as! StartPageHeaderView
         switch activeSections[indexPath.section] {
         case .webApps:
-            header.titleLabel.text = "WebApps (Pantalla completa) · Mantén pulsado Seleccionar para opciones"
+            header.titleLabel.text = isEditingShortcuts
+                ? "WebApps · Pulsa cualquiera para eliminarla o configurar auto-inicio"
+                : "WebApps (Pantalla completa) · Mantén OK para opciones"
         case .favorites:
-            header.titleLabel.text = "Favoritos"
+            header.titleLabel.text = isEditingShortcuts
+                ? "Modo Edición · Pulsa un favorito para editarlo, moverlo o eliminarlo"
+                : "Favoritos · Accesos directos (Mantén OK o pulsa 'Editar accesos')"
         case .recent:
-            header.titleLabel.text = "Visitados recientemente"
+            header.titleLabel.text = "Visitados recientemente (Mantén OK para guardar en Favoritos)"
         }
         return header
     }
@@ -279,14 +471,20 @@ extension StartPageViewController: UICollectionViewDataSource, UICollectionViewD
         switch activeSections[indexPath.section] {
         case .webApps:
             let app = BrowserStore.shared.webApps[indexPath.item]
-            let badge = app.autoLaunch ? "AUTO" : "APP"
-            cell.configure(title: app.title, urlString: app.urlString, badge: badge, tint: .systemIndigo)
+            let badge = isEditingShortcuts ? "✕ EDITAR" : (app.autoLaunch ? "AUTO" : "APP")
+            let badgeColor: UIColor = isEditingShortcuts ? .systemRed : .systemIndigo
+            cell.configure(title: app.title, urlString: app.urlString, badge: badge, badgeColor: badgeColor, tint: .systemIndigo)
         case .favorites:
-            let bm = BrowserStore.shared.bookmarks[indexPath.item]
-            cell.configure(title: bm.title, urlString: bm.urlString, badge: nil, tint: .systemBlue)
+            if indexPath.item >= BrowserStore.shared.bookmarks.count {
+                cell.configureAddTile()
+            } else {
+                let bm = BrowserStore.shared.bookmarks[indexPath.item]
+                let badge = isEditingShortcuts ? "✕ EDITAR" : nil
+                cell.configure(title: bm.title, urlString: bm.urlString, badge: badge, badgeColor: .systemRed, tint: .systemBlue)
+            }
         case .recent:
             let hist = recentItems()[indexPath.item]
-            cell.configure(title: hist.title, urlString: hist.urlString, badge: nil, tint: .systemTeal)
+            cell.configure(title: hist.title, urlString: hist.urlString, badge: nil, badgeColor: .systemTeal, tint: .systemTeal)
         }
         return cell
     }
@@ -294,14 +492,28 @@ extension StartPageViewController: UICollectionViewDataSource, UICollectionViewD
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         switch activeSections[indexPath.section] {
         case .webApps:
-            let app = BrowserStore.shared.webApps[indexPath.item]
-            onSelectWebApp?(app)
+            if isEditingShortcuts {
+                presentWebAppOptions(at: indexPath.item)
+            } else {
+                let app = BrowserStore.shared.webApps[indexPath.item]
+                onSelectWebApp?(app)
+            }
         case .favorites:
-            let bm = BrowserStore.shared.bookmarks[indexPath.item]
-            if let url = URL(string: bm.urlString) { onSelectURL?(url) }
+            if indexPath.item >= BrowserStore.shared.bookmarks.count {
+                presentAddShortcutMenu()
+            } else if isEditingShortcuts {
+                presentFavoriteOptions(at: indexPath.item)
+            } else {
+                let bm = BrowserStore.shared.bookmarks[indexPath.item]
+                if let url = URL(string: bm.urlString) { onSelectURL?(url) }
+            }
         case .recent:
             let hist = recentItems()[indexPath.item]
-            if let url = URL(string: hist.urlString) { onSelectURL?(url) }
+            if isEditingShortcuts {
+                presentOptionsForItem(at: indexPath)
+            } else if let url = URL(string: hist.urlString) {
+                onSelectURL?(url)
+            }
         }
     }
 }
@@ -334,11 +546,12 @@ private final class StartPageTileCell: UICollectionViewCell {
     private let tagLabel = UILabel()
     private let titleLabel = UILabel()
     private let hostLabel = UILabel()
+    private var unfocusedCardBackground = UIColor.white.withAlphaComponent(0.10)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = UIColor.white.withAlphaComponent(0.10)
+        card.backgroundColor = unfocusedCardBackground
         card.layer.cornerRadius = 18
         card.layer.borderWidth = 2.5
         card.layer.borderColor = UIColor.clear.cgColor
@@ -401,18 +614,37 @@ private final class StartPageTileCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(title: String, urlString: String, badge: String?, tint: UIColor) {
+    func configure(title: String, urlString: String, badge: String?, badgeColor: UIColor, tint: UIColor) {
         let host = URL(string: urlString)?.host?.replacingOccurrences(of: "www.", with: "") ?? urlString
         let letter = String((host.first ?? title.first ?? "W")).uppercased()
+        unfocusedCardBackground = UIColor.white.withAlphaComponent(0.10)
         iconBadge.text = letter
         iconBadge.backgroundColor = tint
         titleLabel.text = title
         hostLabel.text = host
         if let badge = badge {
             tagLabel.isHidden = false
+            tagLabel.backgroundColor = badgeColor
             tagLabel.text = " \(badge) "
         } else {
             tagLabel.isHidden = true
+        }
+        if !isFocused {
+            card.backgroundColor = unfocusedCardBackground
+        }
+    }
+
+    func configureAddTile() {
+        unfocusedCardBackground = UIColor.systemBlue.withAlphaComponent(0.18)
+        iconBadge.text = "+"
+        iconBadge.backgroundColor = .systemBlue
+        titleLabel.text = "Añadir acceso"
+        hostLabel.text = "Página actual o URL"
+        tagLabel.isHidden = false
+        tagLabel.backgroundColor = .systemBlue
+        tagLabel.text = " NUEVO "
+        if !isFocused {
+            card.backgroundColor = unfocusedCardBackground
         }
     }
 
@@ -426,7 +658,7 @@ private final class StartPageTileCell: UICollectionViewCell {
                 self.hostLabel.textColor = UIColor.black.withAlphaComponent(0.65)
             } else {
                 self.card.transform = .identity
-                self.card.backgroundColor = UIColor.white.withAlphaComponent(0.10)
+                self.card.backgroundColor = self.unfocusedCardBackground
                 self.card.layer.borderColor = UIColor.clear.cgColor
                 self.titleLabel.textColor = .white
                 self.hostLabel.textColor = UIColor.white.withAlphaComponent(0.6)

@@ -170,6 +170,21 @@ final class BrowserStore {
         saveBookmarks()
     }
 
+    func updateBookmark(at index: Int, title: String, urlString: String) {
+        guard bookmarks.indices.contains(index) else { return }
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayTitle = cleanTitle.isEmpty ? urlString : cleanTitle
+        bookmarks[index] = BookmarkItem(title: displayTitle, urlString: urlString)
+        saveBookmarks()
+    }
+
+    func moveBookmarkToFront(at index: Int) {
+        guard bookmarks.indices.contains(index), index > 0 else { return }
+        let item = bookmarks.remove(at: index)
+        bookmarks.insert(item, at: 0)
+        saveBookmarks()
+    }
+
     func isBookmarked(urlString: String) -> Bool {
         bookmarks.contains { $0.urlString == urlString }
     }
@@ -335,8 +350,8 @@ final class BrowserStore {
         var lines = [
             "<!DOCTYPE NETSCAPE-Bookmark-file-1>",
             "<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">",
-            "<TITLE>Marcadores TVBrowser</TITLE>",
-            "<H1>Marcadores TVBrowser</H1>",
+            "<TITLE>Marcadores Platanet</TITLE>",
+            "<H1>Marcadores Platanet</H1>",
             "<DL><p>"
         ]
         for b in bookmarks {

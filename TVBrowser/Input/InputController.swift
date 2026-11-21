@@ -69,8 +69,8 @@ final class InputController {
     }
 
     func applyScrollImpulse(velocity: CGPoint) {
-        // Clamp extreme flick velocities while preserving snappy inertia
-        let maxV: CGFloat = 3400
+        // Clamp extreme flick velocities while keeping gentle, controllable inertia
+        let maxV: CGFloat = 2200
         let vx = max(-maxV, min(maxV, velocity.x))
         let vy = max(-maxV, min(maxV, velocity.y))
         scrollVelocity = CGPoint(x: vx, y: vy)
@@ -186,7 +186,7 @@ final class InputController {
 
     func handlePressesBegan(_ presses: Set<UIPress>, allowToolbarToggle: Bool, interceptMenu: Bool = true) -> Bool {
         var handled = false
-        let immediateStep: CGFloat = 24.0
+        let immediateStep: CGFloat = 16.0
         let webInputActive = delegate?.inputControllerIsWebInputFocused() ?? false
 
         for press in presses {
@@ -395,10 +395,10 @@ final class InputController {
         let dt = lastTimestamp == 0 ? (1.0 / 60.0) : min(link.timestamp - lastTimestamp, 0.05)
         lastTimestamp = link.timestamp
 
-        // 1. D-Pad / Arrow keys movement with smooth acceleration
+        // 1. D-Pad / Arrow keys movement with smooth, controllable acceleration
         if !activeDirections.isEmpty {
             dpadHoldDuration += dt
-            let speed: CGFloat = min(26.0, 9.0 + CGFloat(dpadHoldDuration) * 18.0)
+            let speed: CGFloat = min(16.5, 5.5 + CGFloat(dpadHoldDuration) * 12.0)
             var dx: CGFloat = 0
             var dy: CGFloat = 0
             if activeDirections.contains(.leftArrow) { dx -= speed }
@@ -415,7 +415,7 @@ final class InputController {
             let dx = scrollVelocity.x * CGFloat(dt)
             let dy = scrollVelocity.y * CGFloat(dt)
             delegate?.inputControllerDidScroll(delta: CGPoint(x: dx, y: dy))
-            let decay = pow(0.05, dt)
+            let decay = pow(0.02, dt)
             scrollVelocity.x *= decay
             scrollVelocity.y *= decay
         } else if scrollVelocity != .zero {

@@ -37,7 +37,7 @@ final class BrowserMenuViewController: UIViewController {
 
     private func setupHeader() {
         let titleLabel = UILabel()
-        titleLabel.text = "Menú de TVBrowser"
+        titleLabel.text = "Menú de Platanet"
         titleLabel.font = .systemFont(ofSize: 38, weight: .bold)
         titleLabel.textColor = .white
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
