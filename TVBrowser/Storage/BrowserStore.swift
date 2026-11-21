@@ -67,7 +67,7 @@ final class BrowserStore {
     private let bookmarksKey = "tvbrowser_bookmarks_v1"
     private let historyKey = "tvbrowser_history_v1"
     private let webAppsKey = "tvbrowser_webapps_v1"
-    private let zoomKey = "tvbrowser_zoom_v1"
+    private let zoomKey = "tvbrowser_zoom_v2"
     private let userAgentKey = "tvbrowser_ua_mode_v1"
     private let searchEngineKey = "tvbrowser_search_engine_v1"
     private let keychainService = "com.local.tvbrowser.credentials"
@@ -79,10 +79,12 @@ final class BrowserStore {
     private(set) var webApps: [WebAppItem] = []
     private(set) var credentials: [SavedCredential] = []
 
+    static let defaultTVZoom: Double = 1.40
+
     var pageZoom: Double {
         get {
             let val = UserDefaults.standard.double(forKey: zoomKey)
-            return val > 0 ? val : 1.0
+            return val > 0 ? val : Self.defaultTVZoom
         }
         set {
             let clamped = max(0.75, min(2.5, newValue))

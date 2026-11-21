@@ -628,6 +628,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 if (document.documentElement) {
                     document.documentElement.style.zoom = '';
                     document.documentElement.style.width = '';
+                    document.documentElement.style.overflowX = '';
                     document.documentElement.style.webkitTextSizeAdjust = '';
                 }
             })();
@@ -639,6 +640,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 if (document.documentElement) {
                     document.documentElement.style.zoom = '\(zoom)';
                     document.documentElement.style.width = '\(widthPct)%';
+                    document.documentElement.style.overflowX = 'clip';
                     document.documentElement.style.webkitTextSizeAdjust = '\(Int(zoom * 100))%';
                 }
             })();
@@ -787,22 +789,22 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     }
 
     @objc private func zoomResetTapped() {
-        setZoom(1.0)
+        setZoom(BrowserStore.defaultTVZoom)
     }
 
     @objc private func presentZoomPresetPicker() {
         let currentPct = Int(round((activeTab?.zoom ?? BrowserStore.shared.pageZoom) * 100))
         let alert = UIAlertController(
             title: "Escala / Zoom de pantalla (\(currentPct)%)",
-            message: "Elige un tamaño cómodo para tu televisor. También puedes ajustar con A- / A+ en directo.",
+            message: "Elige un tamaño cómodo para tu televisor. También puedes ajustar con A- / A+ en directo o pellizcando en el iPhone.",
             preferredStyle: .alert
         )
         let presets: [(String, Double)] = [
-            ("100% (Estándar)", 1.0),
-            ("115% (Suave)", 1.15),
-            ("130% (Recomendado TV 55\")", 1.30),
-            ("150% (Grande)", 1.50),
-            ("175% (Muy grande)", 1.75),
+            ("100% (Original PC)", 1.0),
+            ("120% (Suave)", 1.20),
+            ("140% (Por defecto TV 55\")", 1.40),
+            ("160% (Grande)", 1.60),
+            ("180% (Muy grande)", 1.80),
             ("200% (Extra grande)", 2.0),
             ("225% (Gigante)", 2.25),
             ("250% (Máximo)", 2.50)
