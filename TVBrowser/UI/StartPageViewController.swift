@@ -112,12 +112,13 @@ private final class StartPageFaviconCache {
     }
 }
 
-final class StartPageViewController: UIViewController {
+final class StartPageViewController: UIViewController, UIGestureRecognizerDelegate {
     var onSearchTapped: (() -> Void)?
     var onSelectURL: ((URL) -> Void)?
     var onSelectWebApp: ((WebAppItem) -> Void)?
     var onClose: (() -> Void)?
 
+    var canDismissToWeb: Bool = true
     var currentPageTitle: String?
     var currentPageURL: URL?
 
@@ -152,11 +153,18 @@ final class StartPageViewController: UIViewController {
 
         let menuTap = UITapGestureRecognizer(target: self, action: #selector(menuButtonPressed))
         menuTap.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        menuTap.delegate = self
         view.addGestureRecognizer(menuTap)
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // On initial launch with no web page behind Start Page (and not editing), let tvOS handle Menu to exit cleanly
+        isEditingShortcuts || canDismissToWeb
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        closeButton.isHidden = !canDismissToWeb
         reloadStartPageData()
     }
 

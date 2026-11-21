@@ -1,18 +1,20 @@
-# Platanet para Apple TV 4K (tvOS) · v2.2
+# Platanet para Apple TV 4K (tvOS) · v2.3
 
-Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para pantalla grande de salón (TV 4K 55"): física de puntero exponencial y scroll progresivo con easing suave, HUD superior inteligente (`5 s` de auto-ocultación) accesible desde cualquier parte de la página, zoom centrado real (`140%` por defecto, `100%–220%`), Página de Inicio visual con favicons y reordenación completa, navegación estricta con Menú/Focus Engine sin callejones, WebApps en pantalla completa, teclado Bluetooth y remoto iPhone PWA a prueba de bloqueos.
+Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para pantalla grande de salón (TV 4K 55"): arranque directo en la **Página de Inicio (`⌂`)** con accesos directos y favicons, puntero estable y predecible con parada inmediata al soltar, HUD superior con **Play/Pausa** o **OK largo**, zoom centrado real (`140%` por defecto, `100%–220%`), navegación estricta con Menú/Focus Engine sin callejones, WebApps en pantalla completa, teclado Bluetooth y remoto iPhone PWA a prueba de bloqueos.
 
 ---
 
-## Novedades principales (v2.2)
+## Novedades principales (v2.3)
 
-* **HUD superior "TV-First" y barra accesible desde cualquier altura:**
-  * Invoca u oculta la barra (`◀`, `▶`, `⌂ Inicio`, búsqueda/URL SSL, `A-` / `%` / `A+`, `↻/✕`, `☆ +Inicio` / `★ En Inicio`, `📺 Vídeo`, `↕ Scroll` / `🎯 Puntero`, `❏ Pestañas`, `⋯ Menú`, `Listo`) mediante **Play/Pausa largo (0,45 s)** / **OK largo (0,50 s)** o manteniendo el puntero **0,35 s** en los **últimos 12 pt del borde superior**, estés donde estés de la web.
-  * Desaparece suavemente tras **5 segundos** de inactividad (o al pulsar `↓`, `Menú` o `Listo`).
-* **Física de puntero y scroll de precisión:**
-  * Cruceta con micro-paso inicial (`4,5 pt`) para enlaces pequeños y aceleración exponencial controlada para cruzar la pantalla, además de ganancia no lineal en touchpad.
-  * Zona gradual en el 10–12% superior/inferior con frenado suave (*easing*) al soltar para parar en la línea exacta de lectura.
-  * **Play/Pausa (toque corto)** o el botón **`↕ Scroll`** alternan entre *Modo Puntero* y *Modo Scroll* con badge visual discreto.
+* **Arranque directo en Página de Inicio (`Platanet · Inicio`):**
+  * Abre directamente tus accesos directos favoritos, WebApps y buscador con el mando desde el primer segundo (salvo si fijas una WebApp con inicio automático).
+* **Barra superior práctica y sin bloqueos:**
+  * Pulsa **Play/Pausa (toque corto)** o mantén **OK (0,50 s)** desde cualquier parte de una web para abrir/cerrar la barra (`◀`, `▶`, `⌂ Inicio`, búsqueda/URL SSL, `A-` / `%` / `A+`, `↻/✕`, `☆ +Inicio`, `📺 Vídeo`, `↕ Scroll`, `❏ Pestañas`, `⋯ Menú`, `Listo`) sin tener que subir el cursor hasta arriba ni bloquearlo.
+  * Auto-ocultación tras **5 segundos** de inactividad (o al pulsar `↓`, deslizar abajo en el touchpad, `Menú`, `Play/Pausa` o `Listo`).
+* **Puntero estable y predecible (parada inmediata al soltar):**
+  * Cruceta con paso de precisión (`9 pt`) y crucero suave controlado (máx. `640 pt/s`, parada instantánea al soltar), más seguimiento lineal 1:1 en touchpad sin saltos erráticos.
+  * Desplazamiento progresivo suave al mover el puntero en el borde superior/inferior sin atrapar jamás el cursor al cambiar de dirección.
+  * **Play/Pausa mantenido (0,45 s)** o el botón **`↕ Scroll`** alternan entre *Modo Puntero* y *Modo Scroll* con badge visual discreto.
 * **Zoom centrado real (`100%–220%`, `140%` por defecto) y coordenadas 1:1:**
   * Ancho entero alineado con `bounds` + `CGAffineTransform` centrado y recorte de overflow horizontal fantasma.
   * Mapeo geométrico exacto sobre `WKWebView` en `elementFromPoint`, `:hover` y clics (Shadow DOM, `iframe`s con escala/bordes y puente `postMessage` también en hover).
@@ -28,16 +30,16 @@ Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para pantalla g
   * Observación KVO en tiempo real de URL, título y progreso para **SPAs modernas**, diálogos JS, página de error con *Reintentar*, selector de **User-Agent (Mac / iPad / iPhone)**, limpieza de caché/cookies y regla de bloqueo nativo (`WKContentRuleList`).
   * **Reproductor de vídeo TV (`AVPlayerViewController`)** para `<video>` MP4/HLS.
 * **Teclado Bluetooth y Ratón / Trackpad Remoto (PWA + WebSocket):**
-  * **Ratón, Trackpad y Gestos desde iPhone/PC:** sonda rápida tras desbloqueo de pantalla, **Wake Lock** reactivado en cada toque, sincronización de estado (`zoom` / `modo`) y **cola de reintento HTTP `/cmd` con backoff exponencial** si el WebSocket duerme tras bloquear el iPhone.
+  * **Ratón, Trackpad y Gestos desde iPhone/PC:** sonda rápida al desbloquear de pantalla, **Wake Lock** reactivado en cada toque, sincronización de estado (`zoom` / `modo`) y **cola de reintento HTTP `/cmd` con backoff exponencial** si el WebSocket duerme tras bloquear el iPhone.
 
 ---
 
 ## Controles
 
 ### Siri Remote / Mando de TV compatible / Mando iPhone
-* **Mantener el puntero en el borde superior (`12 pt`) durante `0,35 s`, o mantener OK (`0,5 s`) / Play-Pausa (`0,45 s`):** Abre o cierra el **HUD superior** desde cualquier posición de la página; se oculta solo tras **5 s** sin usarlo (o pulsando `↓`, `Menú` o `Listo`).
-* **Play / Pausa (toque corto):** Alterna entre **Modo Puntero** y **Modo Scroll** con indicador visual temporal abajo a la derecha.
-* **Deslizar en touchpad o cruceta (D-Pad):** En *Modo Puntero*, micro-movimiento de precisión al pulsar y aceleración exponencial progresiva al mantener, con scroll gradual en las franjas superior/inferior y frenado suave al soltar. En *Modo Scroll*, desplaza la página con inercia nativa.
+* **Play / Pausa (toque corto) o mantener OK (0,5 s):** Abre o cierra al instante el **HUD superior** desde cualquier posición de la página; se oculta solo tras **5 s** sin usarlo (o pulsando `↓`, deslizando abajo, `Menú` o `Listo`).
+* **Play / Pausa (pulsación larga 0,45 s) o botón `↕ Scroll` en barra:** Alterna entre **Modo Puntero** y **Modo Scroll**.
+* **Touchpad o cruceta (D-Pad):** Mueve el puntero de forma estable y se detiene al instante al soltar; en los bordes superior/inferior desplaza suavemente la página solo mientras sigues avanzando hacia el borde.
 * **Menú / Atrás (regla estricta):** Cierra barra/modal → retrocede en el historial → cierra pestaña secundaria → sale a Apple TV cuando estás en la raíz sin historial.
 
 ### Teclado Bluetooth físico

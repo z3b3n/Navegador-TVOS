@@ -20,8 +20,6 @@ protocol InputControllerDelegate: AnyObject {
     func inputControllerDidPressBack()
     func inputControllerDidPressForward()
     func inputControllerDidToggleToolbar()
-    func inputControllerDidUpdatePhysicsTick(dt: CFTimeInterval)
-    func inputControllerDidEndDpadDirections()
     func inputControllerIsWebInputFocused() -> Bool
     func inputControllerDidTypeText(_ text: String)
     func inputControllerDidSendKeyboardAction(_ action: WebKeyboardAction)
@@ -35,7 +33,7 @@ final class InputController {
     private var dpadHoldDuration: CFTimeInterval = 0
     private var lastTimestamp: CFTimeInterval = 0
 
-    // Scroll inertia velocity (points / second)
+    // Scroll inertia velocity (points / second) for touchpad flicks only
     private var scrollVelocity: CGPoint = .zero
 
     // Press tracking for short vs long press & click-on-release
@@ -56,10 +54,9 @@ final class InputController {
 
     private let playPauseLongThreshold: TimeInterval = 0.45
     private let selectLongPressThreshold: TimeInterval = 0.50
+    private let dpadHoldDelayBeforeGlide: TimeInterval = 0.09
 
     var isSelectPressed: Bool { selectPressActive }
-    var isDpadDirectionHeld: Bool { !activeDirections.isEmpty }
-    var heldDirections: Set<UIPress.PressType> { activeDirections }
 
     func markSelectPanMoved() {
         if selectPressActive {
@@ -70,8 +67,8 @@ final class InputController {
     }
 
     func applyScrollImpulse(velocity: CGPoint) {
-        // Clamp extreme flick velocities while preserving natural native inertia
-        let maxV: CGFloat = 2400
+        // Gentle bounded inertia for touchpad flicks so pages settle quickly without running away
+        let maxV: CGFloat = 1500
         let vx = max(-maxV, min(maxV, velocity.x))
         let vy = max(-maxV, min(maxV, velocity.y))
         scrollVelocity = CGPoint(x: vx, y: vy)
@@ -156,13 +153,13 @@ final class InputController {
 
         mouseInput.mouseMovedHandler = { [weak self] _, deltaX, deltaY in
             DispatchQueue.main.async {
-                self?.delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: CGFloat(deltaX) * 1.15, y: CGFloat(-deltaY) * 1.15))
+                self?.delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: CGFloat(deltaX) * 1.1, y: CGFloat(-deltaY) * 1.1))
             }
         }
 
         mouseInput.scroll.valueChangedHandler = { [weak self] _, xValue, yValue in
             DispatchQueue.main.async {
-                self?.delegate?.inputControllerDidScroll(delta: CGPoint(x: CGFloat(-xValue) * 16.0, y: CGFloat(-yValue) * 16.0))
+                self?.delegate?.inputControllerDidScroll(delta: CGPoint(x: CGFloat(-xValue) * 15.0, y: CGFloat(-yValue) * 15.0))
             }
         }
 
@@ -185,8 +182,8 @@ final class InputController {
 
     func handlePressesBegan(_ presses: Set<UIPress>, allowToolbarToggle: Bool, interceptMenu: Bool = true) -> Bool {
         var handled = false
-        // Small micro-step on quick D-Pad tap for pixel-accurate targeting on small links
-        let microStep: CGFloat = 4.5
+        // Predictable discrete step per tap — stops cleanly with zero runaway
+        let tapStep: CGFloat = 9.0
         let webInputActive = delegate?.inputControllerIsWebInputFocused() ?? false
 
         for press in presses {
@@ -261,23 +258,27 @@ final class InputController {
             switch press.type {
             case .upArrow:
                 cancelScrollInertia()
+                if activeDirections.isEmpty { dpadHoldDuration = 0 }
                 activeDirections.insert(press.type)
-                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: 0, y: -microStep))
+                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: 0, y: -tapStep))
                 handled = true
             case .downArrow:
                 cancelScrollInertia()
+                if activeDirections.isEmpty { dpadHoldDuration = 0 }
                 activeDirections.insert(press.type)
-                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: 0, y: microStep))
+                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: 0, y: tapStep))
                 handled = true
             case .leftArrow:
                 cancelScrollInertia()
+                if activeDirections.isEmpty { dpadHoldDuration = 0 }
                 activeDirections.insert(press.type)
-                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: -microStep, y: 0))
+                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: -tapStep, y: 0))
                 handled = true
             case .rightArrow:
                 cancelScrollInertia()
+                if activeDirections.isEmpty { dpadHoldDuration = 0 }
                 activeDirections.insert(press.type)
-                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: microStep, y: 0))
+                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: tapStep, y: 0))
                 handled = true
             case .select:
                 selectPressActive = true
@@ -295,16 +296,13 @@ final class InputController {
             case .playPause:
                 playPauseLongFired = false
                 playPauseLongTimer?.invalidate()
-                if allowToolbarToggle {
-                    playPauseLongTimer = Timer.scheduledTimer(withTimeInterval: playPauseLongThreshold, repeats: false) { [weak self] _ in
-                        guard let self = self else { return }
-                        self.playPauseLongFired = true
-                        self.delegate?.inputControllerDidToggleToolbar()
-                    }
+                playPauseLongTimer = Timer.scheduledTimer(withTimeInterval: playPauseLongThreshold, repeats: false) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.playPauseLongFired = true
+                    self.delegate?.inputControllerDidToggleMode()
                 }
                 handled = true
             case .menu:
-                // Strict Menu rule: never open HUD with long Menu; only intercept if we can navigate back / close tab
                 if interceptMenu {
                     handled = true
                 }
@@ -323,7 +321,6 @@ final class InputController {
                 activeDirections.remove(press.type)
                 if activeDirections.isEmpty {
                     dpadHoldDuration = 0
-                    delegate?.inputControllerDidEndDpadDirections()
                 }
                 handled = true
             case .select:
@@ -341,7 +338,8 @@ final class InputController {
                 playPauseLongTimer?.invalidate()
                 playPauseLongTimer = nil
                 if !playPauseLongFired {
-                    delegate?.inputControllerDidToggleMode()
+                    // Short Play/Pause opens/closes the top Safari HUD directly from anywhere
+                    delegate?.inputControllerDidToggleToolbar()
                 }
                 playPauseLongFired = false
                 handled = true
@@ -361,10 +359,7 @@ final class InputController {
             switch press.type {
             case .upArrow, .downArrow, .leftArrow, .rightArrow:
                 activeDirections.remove(press.type)
-                if activeDirections.isEmpty {
-                    dpadHoldDuration = 0
-                    delegate?.inputControllerDidEndDpadDirections()
-                }
+                if activeDirections.isEmpty { dpadHoldDuration = 0 }
             case .select:
                 selectLongTimer?.invalidate()
                 selectLongTimer = nil
@@ -385,39 +380,39 @@ final class InputController {
         let dt = lastTimestamp == 0 ? (1.0 / 60.0) : min(link.timestamp - lastTimestamp, 0.05)
         lastTimestamp = link.timestamp
 
-        // 0. Per-frame browser scroll proximity & easing driver
-        delegate?.inputControllerDidUpdatePhysicsTick(dt: dt)
-
-        // 1. D-Pad / Arrow keys with controlled exponential acceleration curve:
-        //    slow & steady at start for fine link targeting, smooth high cruise speed across 1920px.
+        // 1. D-Pad hold glide: brief tap deadband, then predictable capped cruise speed
+        //    so cursor never runs away and stops the exact instant you release the button.
         if !activeDirections.isEmpty {
             dpadHoldDuration += dt
-            let t = min(1.0, CGFloat(dpadHoldDuration) / 0.90)
-            let eased = (exp(3.4 * t) - 1.0) / (exp(3.4) - 1.0)
-            let velocityPtsPerSec: CGFloat = 155.0 + 1245.0 * eased
-            let step = velocityPtsPerSec * CGFloat(dt)
+            if dpadHoldDuration > dpadHoldDelayBeforeGlide {
+                let elapsed = dpadHoldDuration - dpadHoldDelayBeforeGlide
+                let t = min(1.0, CGFloat(elapsed) / 0.35)
+                let smooth = 1.0 - pow(1.0 - t, 2.0) // calm ease-out ramp
+                let speedPtsPerSec: CGFloat = 260.0 + 380.0 * smooth // max 640 pt/s (~10.5 pt/frame)
+                let step = speedPtsPerSec * CGFloat(dt)
 
-            var dx: CGFloat = 0
-            var dy: CGFloat = 0
-            if activeDirections.contains(.leftArrow) { dx -= step }
-            if activeDirections.contains(.rightArrow) { dx += step }
-            if activeDirections.contains(.upArrow) { dy -= step }
-            if activeDirections.contains(.downArrow) { dy += step }
-            if dx != 0 && dy != 0 {
-                dx *= 0.78
-                dy *= 0.78
-            }
-            if dx != 0 || dy != 0 {
-                delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: dx, y: dy))
+                var dx: CGFloat = 0
+                var dy: CGFloat = 0
+                if activeDirections.contains(.leftArrow) { dx -= step }
+                if activeDirections.contains(.rightArrow) { dx += step }
+                if activeDirections.contains(.upArrow) { dy -= step }
+                if activeDirections.contains(.downArrow) { dy += step }
+                if dx != 0 && dy != 0 {
+                    dx *= 0.78
+                    dy *= 0.78
+                }
+                if dx != 0 || dy != 0 {
+                    delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: dx, y: dy))
+                }
             }
         }
 
-        // 2. Smooth scroll inertia after touchpad / scroll-mode release
-        if abs(scrollVelocity.x) > 10 || abs(scrollVelocity.y) > 10 {
+        // 2. Crisp short-tail inertia for touchpad flicks in Scroll mode
+        if abs(scrollVelocity.x) > 18 || abs(scrollVelocity.y) > 18 {
             let dx = scrollVelocity.x * CGFloat(dt)
             let dy = scrollVelocity.y * CGFloat(dt)
             delegate?.inputControllerDidScroll(delta: CGPoint(x: dx, y: dy))
-            let decay = pow(0.015, dt)
+            let decay = pow(0.002, dt)
             scrollVelocity.x *= decay
             scrollVelocity.y *= decay
         } else if scrollVelocity != .zero {
@@ -433,14 +428,14 @@ final class InputController {
             let mag = hypot(lx, ly)
             if mag > 0.14 {
                 let norm = min(1.0, (mag - 0.14) / 0.86)
-                let curveSpeed = (220.0 + 1150.0 * pow(norm, 1.65)) * CGFloat(dt)
+                let curveSpeed = (220.0 + 460.0 * norm) * CGFloat(dt)
                 delegate?.inputControllerDidMoveCursor(delta: CGPoint(x: (lx / mag) * curveSpeed, y: (-ly / mag) * curveSpeed))
             }
 
             let rx = CGFloat(gp.rightThumbstick.xAxis.value)
             let ry = CGFloat(gp.rightThumbstick.yAxis.value)
             if abs(rx) > 0.14 || abs(ry) > 0.14 {
-                let scrollSpeed = 1350.0 * CGFloat(dt)
+                let scrollSpeed = 900.0 * CGFloat(dt)
                 delegate?.inputControllerDidScroll(delta: CGPoint(x: rx * scrollSpeed, y: -ry * scrollSpeed))
             }
 

@@ -19,6 +19,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private let cursorView = VirtualCursorView()
     private let inputController = InputController()
     private var panGesture: UIPanGestureRecognizer?
+    private var toolbarDismissSwipe: UISwipeGestureRecognizer?
     private let remoteServer = LocalExportServer()
     private var remoteServerURL: String?
     private var remoteServerRunning = false
@@ -53,17 +54,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private var toolbarVisible = false
     private var toolbarAutoHideWorkItem: DispatchWorkItem?
     private let toolbarInactivityTimeout: TimeInterval = 5.0
-    private var suppressTopEdgeToolbarUntil: CFTimeInterval = 0
-    private var topEdgeDwellWorkItem: DispatchWorkItem?
-    private var isInTopEdgeDwellZone = false
-    private let topEdgeDwellHeight: CGFloat = 12.0
-    private let topEdgeDwellDuration: TimeInterval = 0.35
-
-    private var currentEdgeScrollVelocity: CGPoint = .zero
-    private var targetEdgeScrollVelocity: CGPoint = .zero
-    private var lastProximityInputTime: CFTimeInterval = 0
-    private var lastDpadScrollDelta: CGPoint = .zero
-    private var lastDpadScrollDeltaTime: CFTimeInterval = 0
+    private var shouldPresentInitialStartPage = false
     private var interceptedMenuOnBegan = false
 
     private var hasPositionedInitialCursor = false
@@ -74,7 +65,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private var pendingScrollDelta: CGPoint = .zero
     private var innerScrollInFlight = false
     private var lastHoverCheckTime: CFTimeInterval = 0
-    private var hoverCheckScheduled = false
+    private var hoverSettleWorkItem: DispatchWorkItem?
     private var lastFailedURLByTab: [UUID: URL] = [:]
 
     private let homeSearchURL = URL(string: "https://www.google.com")!
@@ -125,6 +116,11 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if shouldPresentInitialStartPage {
+            shouldPresentInitialStartPage = false
+            presentStartPage(createNewTab: false, animated: false)
+            return
+        }
         restoreBrowserFocus()
     }
 
@@ -375,10 +371,21 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         pan.delegate = self
         view.addGestureRecognizer(pan)
         panGesture = pan
+
+        let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(hideToolbarTapped))
+        swipeDown.direction = .down
+        swipeDown.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        swipeDown.delegate = self
+        swipeDown.isEnabled = false
+        view.addGestureRecognizer(swipeDown)
+        toolbarDismissSwipe = swipeDown
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        !toolbarVisible && presentedViewController == nil
+        if gestureRecognizer === toolbarDismissSwipe {
+            return toolbarVisible && presentedViewController == nil
+        }
+        return !toolbarVisible && presentedViewController == nil
     }
 
     private func showToast(_ text: String, duration: TimeInterval = 1.6) {
@@ -424,10 +431,10 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         if let autoApp = BrowserStore.shared.autoLaunchWebApp,
            let url = URL(string: autoApp.urlString) {
             openTab(url: url, webApp: autoApp, switchToIt: true)
-            showToast("WebApp: \(autoApp.title) (Mantén OK o Play para barra)", duration: 3.0)
+            showToast("WebApp: \(autoApp.title) (Play o Mantén OK para barra)", duration: 3.0)
         } else {
-            openTab(url: homeSearchURL, webApp: nil, switchToIt: true)
-            showToast("Borde sup. (0.35s) o Mantén OK/Play: Barra · Play corto: Puntero/Scroll", duration: 3.8)
+            openTab(url: nil, webApp: nil, switchToIt: true)
+            shouldPresentInitialStartPage = true
         }
     }
 
@@ -617,43 +624,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         targetTab.engine.evaluateJavaScript(enforceCenteredLayoutJS, completion: nil)
     }
 
-    private func cancelTopEdgeDwell() {
-        topEdgeDwellWorkItem?.cancel()
-        topEdgeDwellWorkItem = nil
-        isInTopEdgeDwellZone = false
-    }
-
-    private func scheduleTopEdgeDwellIfNeeded() {
-        guard !isInTopEdgeDwellZone,
-              !toolbarVisible,
-              presentedViewController == nil,
-              cursorView.mode == .pointer,
-              activeTab?.isAppMode != true,
-              CACurrentMediaTime() >= suppressTopEdgeToolbarUntil else { return }
-
-        isInTopEdgeDwellZone = true
-        let work = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            self.topEdgeDwellWorkItem = nil
-            guard self.isInTopEdgeDwellZone,
-                  self.cursorView.center.y <= self.topEdgeDwellHeight,
-                  self.cursorView.mode == .pointer,
-                  !self.toolbarVisible,
-                  self.presentedViewController == nil,
-                  self.activeTab?.isAppMode != true else {
-                self.isInTopEdgeDwellZone = false
-                return
-            }
-            self.isInTopEdgeDwellZone = false
-            self.setToolbarVisible(true)
-        }
-        topEdgeDwellWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + topEdgeDwellDuration, execute: work)
-    }
-
     override func present(_ viewControllerToPresent: UIViewController, animated flag: Bool, completion: (() -> Void)? = nil) {
         cancelToolbarAutoHide()
-        cancelTopEdgeDwell()
         super.present(viewControllerToPresent, animated: flag, completion: completion)
     }
 
@@ -680,12 +652,10 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             if visible { scheduleToolbarAutoHide() }
             return
         }
-        cancelTopEdgeDwell()
-        currentEdgeScrollVelocity = .zero
-        targetEdgeScrollVelocity = .zero
         toolbarVisible = visible
         cursorView.isHidden = visible
         panGesture?.isEnabled = !visible && presentedViewController == nil
+        toolbarDismissSwipe?.isEnabled = visible && presentedViewController == nil
         focusSinkView.isHidden = visible
         if visible {
             linkPreviewLabel.isHidden = true
@@ -702,10 +672,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             }
         } else {
             cancelToolbarAutoHide()
-            suppressTopEdgeToolbarUntil = CACurrentMediaTime() + 0.65
-            if cursorView.center.y < 165 {
-                cursorView.center.y = 165
-            }
             UIView.animate(withDuration: 0.18, animations: {
                 self.toolbarContainer.alpha = 0
             }) { _ in
@@ -948,7 +914,12 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             self.restoreBrowserFocus()
         })
         alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
-            self?.restoreBrowserFocus()
+            guard let self = self else { return }
+            if (self.currentEngine?.currentURL ?? self.activeTab?.url) == nil {
+                self.presentStartPage(createNewTab: false)
+            } else {
+                self.restoreBrowserFocus()
+            }
         })
         present(alert, animated: true)
     }
@@ -1295,15 +1266,16 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         showToast("WebApp '\(app.title)' guardada")
     }
 
-    private func presentStartPage(createNewTab: Bool = false) {
+    private func presentStartPage(createNewTab: Bool = false, animated: Bool = true) {
         let vc = StartPageViewController()
         vc.modalPresentationStyle = .fullScreen
+        vc.canDismissToWeb = !createNewTab && ((currentEngine?.currentURL ?? activeTab?.url) != nil)
         vc.currentPageTitle = currentEngine?.currentTitle ?? activeTab?.title
         vc.currentPageURL = currentEngine?.currentURL ?? activeTab?.url
         vc.onSearchTapped = { [weak self] in
-            vc.dismiss(animated: true) {
+            vc.dismiss(animated: false) {
                 if createNewTab {
-                    self?.openTab(url: self?.homeSearchURL, switchToIt: true)
+                    self?.openTab(url: nil, switchToIt: true)
                 }
                 self?.urlTapped()
             }
@@ -1316,6 +1288,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                     self?.activeTab?.webApp = nil
                     self?.load(url: url)
                 }
+                self?.showToast("Play o Mantén OK: Barra Safari", duration: 2.8)
                 self?.restoreBrowserFocus()
             }
         }
@@ -1327,7 +1300,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 } else {
                     self?.openTab(url: url, webApp: app, switchToIt: true)
                 }
-                self?.showToast("WebApp: \(app.title) (Mantén Menú para salir)")
+                self?.showToast("WebApp: \(app.title) (Play o Mantén OK para barra)")
                 self?.restoreBrowserFocus()
             }
         }
@@ -1336,7 +1309,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 self?.restoreBrowserFocus()
             }
         }
-        present(vc, animated: true)
+        present(vc, animated: animated)
     }
 
     @objc private func bookmarksTapped() {
@@ -1406,9 +1379,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     @objc private func modeTapped() {
         cursorView.mode = (cursorView.mode == .pointer) ? .scroll : .pointer
-        cancelTopEdgeDwell()
-        currentEdgeScrollVelocity = .zero
-        targetEdgeScrollVelocity = .zero
         updateToolbarState()
         showModeBadge(for: cursorView.mode)
     }
@@ -1553,8 +1523,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         switch gesture.state {
         case .began:
             inputController.cancelScrollInertia()
-            currentEdgeScrollVelocity = .zero
-            targetEdgeScrollVelocity = .zero
             lastPanPoint = point
             panStartPoint = point
         case .changed:
@@ -1570,23 +1538,21 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 return
             }
 
+            // Clamped smooth linear tracking so touchpad swipes never spike or teleport
+            let clampedDX = max(-38.0, min(38.0, dx))
+            let clampedDY = max(-38.0, min(38.0, dy))
             if cursorView.mode == .pointer {
-                // Non-linear precision curve: surgical slow micro-aiming, swift large sweeps
-                let mag = hypot(dx, dy)
-                let gain = min(1.85, 0.72 + pow(max(0, mag), 0.35) * 0.36)
-                moveCursor(by: CGPoint(x: dx * gain, y: dy * gain))
+                moveCursor(by: CGPoint(x: clampedDX * 0.95, y: clampedDY * 0.95))
             } else {
-                scrollWebView(by: CGPoint(x: -dx * 1.0, y: -dy * 1.0))
+                scrollWebView(by: CGPoint(x: -clampedDX * 0.90, y: -clampedDY * 0.90))
             }
         case .ended, .cancelled:
-            targetEdgeScrollVelocity = .zero
             if cursorView.mode == .scroll {
                 let vel = gesture.velocity(in: view)
-                inputController.applyScrollImpulse(velocity: CGPoint(x: -vel.x * 0.45, y: -vel.y * 0.45))
+                inputController.applyScrollImpulse(velocity: CGPoint(x: -vel.x * 0.25, y: -vel.y * 0.25))
             }
             lastPanPoint = .zero
         default:
-            targetEdgeScrollVelocity = .zero
             lastPanPoint = .zero
         }
     }
@@ -1673,7 +1639,6 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         if presses.contains(where: { $0.type == .menu }) {
             interceptedMenuOnBegan = false
         }
-        targetEdgeScrollVelocity = .zero
         inputController.handlePressesCancelled(presses)
         super.pressesCancelled(presses, with: event)
     }
@@ -1682,36 +1647,21 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     private func moveCursor(by delta: CGPoint) {
         let bounds = view.bounds
-        let nextX = max(4, min(bounds.width - 4, cursorView.center.x + delta.x))
-        let nextY = max(4, min(bounds.height - 4, cursorView.center.y + delta.y))
+        let nextX = max(8, min(bounds.width - 8, cursorView.center.x + delta.x))
+        let nextY = max(8, min(bounds.height - 8, cursorView.center.y + delta.y))
         cursorView.center = CGPoint(x: nextX, y: nextY)
 
-        let now = CACurrentMediaTime()
-
-        // Top 12 pt physical edge dwell (0.35s) invokes the top HUD from anywhere on the page
-        if nextY <= topEdgeDwellHeight {
-            targetEdgeScrollVelocity = .zero
-            currentEdgeScrollVelocity = .zero
-            scheduleTopEdgeDwellIfNeeded()
-        } else {
-            cancelTopEdgeDwell()
-
-            // Progressive 11-12% top/bottom proximity scroll bands (drives continuous CADisplayLink easing)
-            let bottomZoneSpan = max(110.0, bounds.height * 0.12)
-            let bottomZoneStart = bounds.height - bottomZoneSpan
-            let topScrollEnd = max(105.0, bounds.height * 0.115)
-
-            if nextY >= bottomZoneStart && delta.y > 0 {
-                let p = min(1.0, (nextY - bottomZoneStart) / bottomZoneSpan)
-                targetEdgeScrollVelocity.y = 85.0 + 740.0 * (p * p)
-                lastProximityInputTime = now
-            } else if nextY > topEdgeDwellHeight && nextY <= topScrollEnd && delta.y < 0 {
-                let p = min(1.0, (topScrollEnd - nextY) / max(1.0, topScrollEnd - topEdgeDwellHeight))
-                targetEdgeScrollVelocity.y = -(85.0 + 740.0 * (p * p))
-                lastProximityInputTime = now
-            } else if abs(targetEdgeScrollVelocity.y) > 0 {
-                targetEdgeScrollVelocity = .zero
-            }
+        // Direct, trap-free edge scrolling ONLY while actively pushing against bottom/top margin;
+        // reversing direction or stopping halts scrolling immediately with zero block or lag.
+        let edgeSpan: CGFloat = 95.0
+        if nextY >= bounds.height - edgeSpan && delta.y > 0 {
+            let p = min(1.0, (nextY - (bounds.height - edgeSpan)) / edgeSpan)
+            let step = min(8.0, max(1.8, delta.y * (0.45 + 0.55 * p)))
+            scrollWebView(by: CGPoint(x: 0, y: step))
+        } else if nextY <= edgeSpan && delta.y < 0 {
+            let p = min(1.0, (edgeSpan - nextY) / edgeSpan)
+            let step = max(-8.0, min(-1.8, delta.y * (0.45 + 0.55 * p)))
+            scrollWebView(by: CGPoint(x: 0, y: step))
         }
 
         scheduleHoverUpdate()
@@ -1719,19 +1669,24 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
     private func scheduleHoverUpdate() {
         guard cursorView.mode == .pointer, !toolbarVisible else { return }
+        hoverSettleWorkItem?.cancel()
+
         let now = CACurrentMediaTime()
-        if now - lastHoverCheckTime >= 0.055 {
+        if now - lastHoverCheckTime >= 0.12 {
             lastHoverCheckTime = now
             performHoverProbeAtCursor()
-        } else if !hoverCheckScheduled {
-            hoverCheckScheduled = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
-                guard let self = self else { return }
-                self.hoverCheckScheduled = false
-                self.lastHoverCheckTime = CACurrentMediaTime()
-                self.performHoverProbeAtCursor()
-            }
         }
+
+        // One crisp settle probe right after cursor stops moving so hover state/URL is exact
+        let settle = DispatchWorkItem { [weak self] in
+            guard let self = self,
+                  self.cursorView.mode == .pointer,
+                  !self.toolbarVisible else { return }
+            self.lastHoverCheckTime = CACurrentMediaTime()
+            self.performHoverProbeAtCursor()
+        }
+        hoverSettleWorkItem = settle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: settle)
     }
 
     private func performHoverProbeAtCursor() {
@@ -2514,9 +2469,7 @@ extension BrowserViewController: InputControllerDelegate {
     func inputControllerDidMoveCursor(delta: CGPoint) {
         guard !toolbarVisible, presentedViewController == nil else { return }
         if cursorView.mode == .scroll {
-            lastDpadScrollDelta = delta
-            lastDpadScrollDeltaTime = CACurrentMediaTime()
-            scrollWebView(by: CGPoint(x: delta.x * 0.90, y: delta.y * 0.90))
+            scrollWebView(by: CGPoint(x: delta.x * 1.15, y: delta.y * 1.15))
         } else {
             moveCursor(by: delta)
         }
@@ -2535,36 +2488,6 @@ extension BrowserViewController: InputControllerDelegate {
     func inputControllerDidToggleMode() {
         guard !toolbarVisible, presentedViewController == nil else { return }
         modeTapped()
-    }
-
-    func inputControllerDidUpdatePhysicsTick(dt: CFTimeInterval) {
-        guard !toolbarVisible, presentedViewController == nil else {
-            currentEdgeScrollVelocity = .zero
-            targetEdgeScrollVelocity = .zero
-            return
-        }
-        guard cursorView.mode == .pointer else { return }
-
-        if !inputController.isDpadDirectionHeld && (CACurrentMediaTime() - lastProximityInputTime) > 0.08 {
-            targetEdgeScrollVelocity = .zero
-        }
-        let smoothing = min(1.0, 1.0 - CGFloat(exp(-dt / 0.055)))
-        currentEdgeScrollVelocity.x += (targetEdgeScrollVelocity.x - currentEdgeScrollVelocity.x) * smoothing
-        currentEdgeScrollVelocity.y += (targetEdgeScrollVelocity.y - currentEdgeScrollVelocity.y) * smoothing
-
-        if abs(currentEdgeScrollVelocity.y) > 4.0 {
-            scrollWebView(by: CGPoint(x: 0, y: currentEdgeScrollVelocity.y * CGFloat(dt)))
-        } else if targetEdgeScrollVelocity == .zero && currentEdgeScrollVelocity != .zero {
-            currentEdgeScrollVelocity = .zero
-        }
-    }
-
-    func inputControllerDidEndDpadDirections() {
-        targetEdgeScrollVelocity = .zero
-        if cursorView.mode == .scroll && (CACurrentMediaTime() - lastDpadScrollDeltaTime) < 0.09 {
-            inputController.applyScrollImpulse(velocity: CGPoint(x: lastDpadScrollDelta.x * 14.0, y: lastDpadScrollDelta.y * 14.0))
-        }
-        lastDpadScrollDelta = .zero
     }
 
     func inputControllerDidPressBack() {
