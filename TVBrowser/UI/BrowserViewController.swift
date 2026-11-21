@@ -32,6 +32,9 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private let forwardButton = UIButton(type: .custom)
     private let homeButton = UIButton(type: .custom)
     private let urlButton = UIButton(type: .custom)
+    private let zoomOutButton = UIButton(type: .custom)
+    private let zoomLevelButton = UIButton(type: .custom)
+    private let zoomInButton = UIButton(type: .custom)
     private let reloadButton = UIButton(type: .custom)
     private let bookmarkStarButton = UIButton(type: .custom)
     private let videoButton = UIButton(type: .custom)
@@ -185,7 +188,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         view.addSubview(toolbarContainer)
 
         toolbarStack.axis = .horizontal
-        toolbarStack.spacing = 12
+        toolbarStack.spacing = 10
         toolbarStack.alignment = .center
         toolbarStack.distribution = .fill
         toolbarStack.translatesAutoresizingMaskIntoConstraints = false
@@ -199,8 +202,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
 
             toolbarStack.topAnchor.constraint(equalTo: toolbarContainer.contentView.topAnchor, constant: 12),
             toolbarStack.bottomAnchor.constraint(equalTo: toolbarContainer.contentView.bottomAnchor, constant: -12),
-            toolbarStack.leadingAnchor.constraint(equalTo: toolbarContainer.contentView.leadingAnchor, constant: 18),
-            toolbarStack.trailingAnchor.constraint(equalTo: toolbarContainer.contentView.trailingAnchor, constant: -18)
+            toolbarStack.leadingAnchor.constraint(equalTo: toolbarContainer.contentView.leadingAnchor, constant: 16),
+            toolbarStack.trailingAnchor.constraint(equalTo: toolbarContainer.contentView.trailingAnchor, constant: -16)
         ])
 
         configureButton(backButton, title: "◀", action: #selector(backTapped))
@@ -212,29 +215,34 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         urlButton.titleLabel?.lineBreakMode = .byTruncatingMiddle
         urlButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
         urlButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        urlButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
+        urlButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
 
-        configureButton(reloadButton, title: "↻", action: #selector(reloadTapped))
-        configureButton(bookmarkStarButton, title: "☆", action: #selector(toggleBookmarkTapped))
-        configureButton(videoButton, title: "📺 Vídeo", action: #selector(playDetectedVideoTapped))
+        configureButton(zoomOutButton, title: "A-", action: #selector(zoomOutTapped), horizontalInset: 14)
+        configureButton(zoomLevelButton, title: "100%", action: #selector(presentZoomPresetPicker), horizontalInset: 14)
+        configureButton(zoomInButton, title: "A+", action: #selector(zoomInTapped), horizontalInset: 14)
+
+        configureButton(reloadButton, title: "↻", action: #selector(reloadTapped), horizontalInset: 14)
+        configureButton(bookmarkStarButton, title: "☆", action: #selector(toggleBookmarkTapped), horizontalInset: 14)
+        configureButton(videoButton, title: "📺 Vídeo", action: #selector(playDetectedVideoTapped), horizontalInset: 14)
         videoButton.isHidden = true
 
-        configureButton(tabsButton, title: "❏ 1", action: #selector(tabsTapped))
-        configureButton(moreButton, title: "⋯ Menú", action: #selector(moreTapped))
-        configureButton(hideToolbarButton, title: "Listo", action: #selector(hideToolbarTapped))
+        configureButton(tabsButton, title: "❏ 1", action: #selector(tabsTapped), horizontalInset: 14)
+        configureButton(moreButton, title: "⋯ Menú", action: #selector(moreTapped), horizontalInset: 14)
+        configureButton(hideToolbarButton, title: "Listo", action: #selector(hideToolbarTapped), horizontalInset: 16)
 
         [
             backButton, forwardButton, homeButton,
             urlButton,
+            zoomOutButton, zoomLevelButton, zoomInButton,
             reloadButton, bookmarkStarButton, videoButton,
             tabsButton, moreButton, hideToolbarButton
         ].forEach { toolbarStack.addArrangedSubview($0) }
     }
 
-    private func configureButton(_ button: UIButton, title: String, action: Selector, accent: Bool = false) {
+    private func configureButton(_ button: UIButton, title: String, action: Selector, accent: Bool = false, horizontalInset: CGFloat = 18) {
         button.setTitle(title, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: 25, weight: .semibold)
-        button.contentEdgeInsets = UIEdgeInsets(top: 12, left: 18, bottom: 12, right: 18)
+        button.contentEdgeInsets = UIEdgeInsets(top: 12, left: horizontalInset, bottom: 12, right: horizontalInset)
         button.layer.cornerRadius = 14
         button.backgroundColor = accent ? UIColor.systemBlue.withAlphaComponent(0.55) : UIColor.white.withAlphaComponent(0.14)
         button.setTitleColor(.white, for: .normal)
@@ -553,6 +561,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         let isLoading = currentEngine?.isLoading ?? activeTab?.isLoading ?? false
         reloadButton.setTitle(isLoading ? "✕" : "↻", for: .normal)
         tabsButton.setTitle("❏ \(tabs.count)", for: .normal)
+        let zoomPct = Int(round((activeTab?.zoom ?? BrowserStore.shared.pageZoom) * 100))
+        zoomLevelButton.setTitle("\(zoomPct)%", for: .normal)
         videoButton.isHidden = (activeTab?.detectedVideoURL == nil)
 
         if let currentURL = currentEngine?.currentURL ?? activeTab?.url {
@@ -609,28 +619,65 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         updateToolbarState()
     }
 
-    @objc private func zoomOutTapped() {
+    private func setZoom(_ newZoom: Double, showNotice: Bool = true) {
         guard let tab = activeTab else { return }
-        tab.zoom = max(0.75, tab.zoom - 0.15)
-        if !tab.isAppMode { BrowserStore.shared.pageZoom = tab.zoom }
+        let clamped = max(0.75, min(2.5, newZoom))
+        tab.zoom = clamped
+        if let webApp = tab.webApp {
+            BrowserStore.shared.updateWebAppZoom(id: webApp.id, zoom: clamped)
+        } else {
+            BrowserStore.shared.pageZoom = clamped
+        }
         applyPageZoom(for: tab)
-        showToast("Zoom \(Int(round(tab.zoom * 100)))%")
+        updateToolbarState()
+        if showNotice {
+            showToast("Escala \(Int(round(clamped * 100)))%")
+        }
+    }
+
+    @objc private func zoomOutTapped() {
+        let current = activeTab?.zoom ?? BrowserStore.shared.pageZoom
+        setZoom(current - 0.15)
     }
 
     @objc private func zoomInTapped() {
-        guard let tab = activeTab else { return }
-        tab.zoom = min(2.2, tab.zoom + 0.15)
-        if !tab.isAppMode { BrowserStore.shared.pageZoom = tab.zoom }
-        applyPageZoom(for: tab)
-        showToast("Zoom \(Int(round(tab.zoom * 100)))%")
+        let current = activeTab?.zoom ?? BrowserStore.shared.pageZoom
+        setZoom(current + 0.15)
     }
 
     @objc private func zoomResetTapped() {
-        guard let tab = activeTab else { return }
-        tab.zoom = 1.0
-        if !tab.isAppMode { BrowserStore.shared.pageZoom = 1.0 }
-        applyPageZoom(for: tab)
-        showToast("Zoom 100%")
+        setZoom(1.0)
+    }
+
+    @objc private func presentZoomPresetPicker() {
+        let currentPct = Int(round((activeTab?.zoom ?? BrowserStore.shared.pageZoom) * 100))
+        let alert = UIAlertController(
+            title: "Escala / Zoom de pantalla (\(currentPct)%)",
+            message: "Elige un tamaño cómodo para tu televisor. También puedes ajustar con A- / A+ en directo.",
+            preferredStyle: .alert
+        )
+        let presets: [(String, Double)] = [
+            ("100% (Estándar)", 1.0),
+            ("115% (Suave)", 1.15),
+            ("130% (Recomendado TV 55\")", 1.30),
+            ("150% (Grande)", 1.50),
+            ("175% (Muy grande)", 1.75),
+            ("200% (Extra grande)", 2.0),
+            ("225% (Gigante)", 2.25),
+            ("250% (Máximo)", 2.50)
+        ]
+        for (title, factor) in presets {
+            let pct = Int(round(factor * 100))
+            let label = (abs(pct - currentPct) <= 2) ? "✓ \(title)" : title
+            alert.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
+                self?.setZoom(factor)
+                self?.restoreBrowserFocus()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { [weak self] _ in
+            self?.restoreBrowserFocus()
+        })
+        present(alert, animated: true)
     }
 
     @objc private func shortcutNewTab() {
@@ -810,23 +857,23 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             BrowserMenuActionItem(
                 id: "zoomIn",
                 icon: "A+",
-                title: "Aumentar Zoom",
-                subtitle: "Actual: \(zoomPct)% → \(min(220, zoomPct + 15))%",
+                title: "Aumentar Escala",
+                subtitle: "Actual: \(zoomPct)% → \(min(250, zoomPct + 15))%",
                 accentColor: .systemBlue
             ),
             BrowserMenuActionItem(
                 id: "zoomOut",
                 icon: "A-",
-                title: "Reducir Zoom",
+                title: "Reducir Escala",
                 subtitle: "Actual: \(zoomPct)% → \(max(75, zoomPct - 15))%",
                 accentColor: .systemBlue
             ),
             BrowserMenuActionItem(
-                id: "zoomReset",
-                icon: "1:1",
-                title: "Zoom 100%",
-                subtitle: "Restablecer tamaño normal",
-                accentColor: .systemGray
+                id: "zoomPresets",
+                icon: "\(zoomPct)%",
+                title: "Elegir Escala (TV 55\")",
+                subtitle: "Presets 100% – 250%",
+                accentColor: .systemIndigo
             ),
             BrowserMenuActionItem(
                 id: "video",
@@ -906,6 +953,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             case "zoomOut":
                 self.zoomOutTapped()
                 self.setToolbarVisible(false)
+            case "zoomPresets":
+                self.presentZoomPresetPicker()
             case "zoomReset":
                 self.zoomResetTapped()
                 self.setToolbarVisible(false)
@@ -1210,6 +1259,10 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     // MARK: - Remote Control Server (Phone / PC Trackpad, Mouse & Keyboard)
 
     private func setupRemoteServer() {
+        remoteServer.currentZoomProvider = { [weak self] in
+            self?.activeTab?.zoom ?? BrowserStore.shared.pageZoom
+        }
+
         remoteServer.onClientCountChanged = { [weak self] count in
             guard let self = self else { return }
             self.connectedRemoteClients = count
@@ -1245,6 +1298,8 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
             case .openURL(let raw):
                 self.setToolbarVisible(false)
                 self.openInputURL(raw)
+            case .setZoom(let zoom):
+                self.setZoom(zoom)
             case .action(let name):
                 switch name {
                 case "back": self.backTapped()
@@ -1257,6 +1312,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
                 case "video": self.detectAndPlayVideo()
                 case "zoomIn": self.zoomInTapped()
                 case "zoomOut": self.zoomOutTapped()
+                case "zoomReset": self.zoomResetTapped()
                 default: break
                 }
             }

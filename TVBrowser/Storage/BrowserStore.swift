@@ -85,7 +85,7 @@ final class BrowserStore {
             return val > 0 ? val : 1.0
         }
         set {
-            let clamped = max(0.75, min(2.2, newValue))
+            let clamped = max(0.75, min(2.5, newValue))
             UserDefaults.standard.set(clamped, forKey: zoomKey)
         }
     }
@@ -253,6 +253,12 @@ final class BrowserStore {
         let nextState = !webApps[targetIdx].autoLaunch
         for i in webApps.indices { webApps[i].autoLaunch = false }
         webApps[targetIdx].autoLaunch = nextState
+        saveWebApps()
+    }
+
+    func updateWebAppZoom(id: UUID, zoom: Double) {
+        guard let idx = webApps.firstIndex(where: { $0.id == id }) else { return }
+        webApps[idx].zoom = max(0.75, min(2.5, zoom))
         saveWebApps()
     }
 

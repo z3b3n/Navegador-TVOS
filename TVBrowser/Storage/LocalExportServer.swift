@@ -10,12 +10,14 @@ enum RemoteControlCommand {
     case typeText(String)
     case key(String)
     case openURL(String)
+    case setZoom(Double)
     case action(String)
 }
 
 final class LocalExportServer {
     var onRemoteCommand: ((RemoteControlCommand) -> Void)?
     var onClientCountChanged: ((Int) -> Void)?
+    var currentZoomProvider: (() -> Double)?
 
     private var listener: NWListener?
     private(set) var port: UInt16 = 8080
@@ -212,7 +214,8 @@ final class LocalExportServer {
             DispatchQueue.main.async {
                 let bmCount = BrowserStore.shared.bookmarks.count
                 let pwCount = BrowserStore.shared.credentials.count
-                let html = self.remoteWebAppHTML(bookmarksCount: bmCount, passwordsCount: pwCount)
+                let zoomPct = Int(round((self.currentZoomProvider?() ?? BrowserStore.shared.pageZoom) * 100))
+                let html = self.remoteWebAppHTML(bookmarksCount: bmCount, passwordsCount: pwCount, currentZoomPct: zoomPct)
                 self.sendHTTPResponse(connection: connection, status: "200 OK", contentType: "text/html; charset=utf-8", filename: nil, body: html)
             }
         }
@@ -397,6 +400,12 @@ final class LocalExportServer {
         case "url":
             let value = obj["value"] as? String ?? ""
             command = value.isEmpty ? nil : .openURL(value)
+        case "zoom":
+            if let value = (obj["value"] as? NSNumber)?.doubleValue {
+                command = .setZoom(value)
+            } else {
+                command = nil
+            }
         case "action":
             let name = obj["name"] as? String ?? ""
             command = name.isEmpty ? nil : .action(name)
@@ -436,7 +445,7 @@ final class LocalExportServer {
         """
     }
 
-    private func remoteWebAppHTML(bookmarksCount: Int, passwordsCount: Int) -> String {
+    private func remoteWebAppHTML(bookmarksCount: Int, passwordsCount: Int, currentZoomPct: Int) -> String {
         """
         <!DOCTYPE html>
         <html lang="es">
@@ -524,10 +533,30 @@ final class LocalExportServer {
                 <button class="sec" onclick="act('toolbar')">Barra</button>
                 <button class="sec" onclick="act('tabs')">Pestañas</button>
                 <button class="sec" onclick="act('video')">📺 Vídeo</button>
-                <button class="sec" onclick="act('zoomOut')">A-</button>
-                <button class="sec" onclick="act('zoomIn')">A+</button>
                 <button class="sec" onclick="send({type:'scroll',dx:0,dy:-450})">▲ Subir</button>
                 <button class="sec" onclick="send({type:'scroll',dx:0,dy:450})">▼ Bajar</button>
+                <button class="sec" onclick="send({type:'scroll',dx:0,dy:-2200})">⤒ Arriba</button>
+                <button class="sec" onclick="send({type:'scroll',dx:0,dy:2200})">⤓ Abajo</button>
+            </div>
+
+            <div class="card" style="margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <h2 style="margin:0;">Escala / Zoom de pantalla</h2>
+                    <span id="zoomBadge" class="badge ok">\(currentZoomPct)%</span>
+                </div>
+                <div class="row" style="align-items:center;">
+                    <button class="sec" onclick="stepZoom(-15)">A-</button>
+                    <input id="zoomSlider" type="range" min="75" max="250" step="5" value="\(currentZoomPct)" style="flex:1;accent-color:#3b82f6;">
+                    <button class="sec" onclick="stepZoom(15)">A+</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(6, 1fr);gap:6px;">
+                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(100)">100%</button>
+                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(125)">125%</button>
+                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(140)">140%</button>
+                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(160)">160%</button>
+                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(185)">185%</button>
+                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(210)">210%</button>
+                </div>
             </div>
 
             <div class="card">
@@ -571,6 +600,23 @@ final class LocalExportServer {
                     }
                 }
                 function act(name) { send({ type: 'action', name }); }
+
+                const zoomSlider = document.getElementById('zoomSlider');
+                const zoomBadge = document.getElementById('zoomBadge');
+                function applyZoomPct(pct) {
+                    const clamped = Math.max(75, Math.min(250, Math.round(pct)));
+                    zoomSlider.value = clamped;
+                    zoomBadge.textContent = clamped + '%';
+                    send({ type: 'zoom', value: clamped / 100.0 });
+                }
+                function stepZoom(delta) {
+                    applyZoomPct((parseInt(zoomSlider.value, 10) || 100) + delta);
+                }
+                zoomSlider.addEventListener('input', () => {
+                    const val = parseInt(zoomSlider.value, 10) || 100;
+                    zoomBadge.textContent = val + '%';
+                    send({ type: 'zoom', value: val / 100.0 });
+                });
 
                 function queueMove(dx, dy) {
                     moveBuf.dx += dx; moveBuf.dy += dy;
