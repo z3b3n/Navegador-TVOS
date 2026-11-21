@@ -128,7 +128,7 @@ final class HistoryViewController: UIViewController, UITableViewDataSource, UITa
             bottomFocusGuide.topAnchor.constraint(equalTo: closeButton.bottomAnchor),
             bottomFocusGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bottomFocusGuide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bottomFocusGuide.heightAnchor.constraint(equalToConstant: 24)
+            bottomFocusGuide.bottomAnchor.constraint(equalTo: tableView.topAnchor)
         ])
     }
 

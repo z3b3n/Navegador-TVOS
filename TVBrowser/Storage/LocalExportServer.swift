@@ -18,6 +18,7 @@ final class LocalExportServer {
     var onRemoteCommand: ((RemoteControlCommand) -> Void)?
     var onClientCountChanged: ((Int) -> Void)?
     var currentZoomProvider: (() -> Double)?
+    var currentModeProvider: (() -> String)?
 
     private var listener: NWListener?
     private(set) var port: UInt16 = 8080
@@ -25,6 +26,15 @@ final class LocalExportServer {
 
     private let stateQueue = DispatchQueue(label: "com.local.tvbrowser.remoteserver.state")
     private var webSockets: [ObjectIdentifier: WebSocketClient] = [:]
+    private var cachedZoomPct: Int = Int(round(BrowserStore.defaultTVZoom * 100))
+    private var cachedMode: String = "pointer"
+
+    func updateCachedState(zoomPct: Int, mode: String) {
+        stateQueue.async {
+            self.cachedZoomPct = zoomPct
+            self.cachedMode = mode
+        }
+    }
 
     func start(onReady: @escaping (String?) -> Void) {
         stop()
@@ -194,7 +204,11 @@ final class LocalExportServer {
 
         if method == "POST" && path == "/cmd" {
             self.dispatchJSONCommand(bodyData)
-            sendHTTPResponse(connection: connection, status: "200 OK", contentType: "application/json; charset=utf-8", filename: nil, body: "{\"ok\":true}")
+            var responseJSON = "{\"ok\":true}"
+            stateQueue.sync {
+                responseJSON = "{\"ok\":true,\"zoom\":\(self.cachedZoomPct),\"mode\":\"\(self.cachedMode)\"}"
+            }
+            sendHTTPResponse(connection: connection, status: "200 OK", contentType: "application/json; charset=utf-8", filename: nil, body: responseJSON)
             return
         }
 
@@ -217,7 +231,11 @@ final class LocalExportServer {
         case "/manifest.json":
             sendHTTPResponse(connection: connection, status: "200 OK", contentType: "application/manifest+json; charset=utf-8", filename: nil, body: manifestJSON())
         case "/ping":
-            sendHTTPResponse(connection: connection, status: "200 OK", contentType: "application/json; charset=utf-8", filename: nil, body: "{\"ok\":true}")
+            var pongJSON = "{\"ok\":true}"
+            stateQueue.sync {
+                pongJSON = "{\"ok\":true,\"zoom\":\(self.cachedZoomPct),\"mode\":\"\(self.cachedMode)\"}"
+            }
+            sendHTTPResponse(connection: connection, status: "200 OK", contentType: "application/json; charset=utf-8", filename: nil, body: pongJSON)
         default:
             DispatchQueue.main.async {
                 let bmCount = BrowserStore.shared.bookmarks.count
@@ -253,6 +271,7 @@ final class LocalExportServer {
     private final class WebSocketClient {
         let connection: NWConnection
         var buffer = Data()
+        var lastSeen = Date()
 
         init(connection: NWConnection, initialBytes: Data) {
             self.connection = connection
@@ -267,6 +286,12 @@ final class LocalExportServer {
         let clientId = ObjectIdentifier(client)
 
         stateQueue.async {
+            // Prune silent zombie sockets (older than 30s without traffic)
+            let cutoff = Date().addingTimeInterval(-30.0)
+            for (id, stale) in self.webSockets where stale.lastSeen < cutoff {
+                stale.connection.cancel()
+                self.webSockets.removeValue(forKey: id)
+            }
             self.webSockets[clientId] = client
             let count = self.webSockets.count
             DispatchQueue.main.async { [weak self] in
@@ -362,6 +387,7 @@ final class LocalExportServer {
             }
 
             client.buffer.removeFirst(totalLen)
+            stateQueue.async { client.lastSeen = Date() }
 
             switch opcode {
             case 0x8: // Close
@@ -374,7 +400,10 @@ final class LocalExportServer {
             case 0x1, 0x0: // Text / Continuation
                 if let obj = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
                    (obj["type"] as? String) == "ping" {
-                    sendWebSocketText("{\"type\":\"pong\"}", to: client)
+                    stateQueue.async {
+                        let reply = "{\"type\":\"pong\",\"zoom\":\(self.cachedZoomPct),\"mode\":\"\(self.cachedMode)\"}"
+                        self.sendWebSocketText(reply, to: client)
+                    }
                 } else {
                     dispatchJSONCommand(payload)
                 }
@@ -567,16 +596,16 @@ final class LocalExportServer {
                 </div>
                 <div class="row" style="align-items:center;">
                     <button class="sec" onclick="stepZoom(-15)">A-</button>
-                    <input id="zoomSlider" type="range" min="75" max="250" step="5" value="\(currentZoomPct)" style="flex:1;accent-color:#3b82f6;">
+                    <input id="zoomSlider" type="range" min="100" max="220" step="5" value="\(currentZoomPct)" style="flex:1;accent-color:#3b82f6;">
                     <button class="sec" onclick="stepZoom(15)">A+</button>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(6, 1fr);gap:6px;">
                     <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(100)">100%</button>
-                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(125)">125%</button>
+                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(120)">120%</button>
                     <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(140)">140%</button>
                     <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(160)">160%</button>
                     <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(185)">185%</button>
-                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(210)">210%</button>
+                    <button class="sec" style="padding:8px 4px;font-size:12px;" onclick="applyZoomPct(220)">220%</button>
                 </div>
             </div>
 
@@ -595,6 +624,7 @@ final class LocalExportServer {
             <script>
                 let ws = null;
                 let wsAlive = false;
+                let lastPongAt = 0;
                 let reconnectTimer = null;
                 let heartbeatTimer = null;
                 let pongDeadlineTimer = null;
@@ -611,6 +641,13 @@ final class LocalExportServer {
                 let moveBuf = { dx: 0, dy: 0 };
                 let rafScheduled = false;
 
+                // Reliable HTTP command retry queue when WebSocket sleeps after iPhone screen lock
+                const reliableQueue = [];
+                let flushingQueue = false;
+                let queueRetryTimer = null;
+                let httpFallbackMovePending = null;
+                let httpFallbackMoveInFlight = false;
+
                 async function requestWakeLock() {
                     try {
                         if ('wakeLock' in navigator && !wakeLock && document.visibilityState === 'visible') {
@@ -618,6 +655,25 @@ final class LocalExportServer {
                             wakeLock.addEventListener('release', () => { wakeLock = null; });
                         }
                     } catch (e) {}
+                }
+
+                function setStatusBadge(text, ok) {
+                    const badge = document.getElementById('status');
+                    badge.textContent = text;
+                    badge.className = ok ? 'badge ok' : 'badge';
+                }
+
+                function syncStateFromServer(data) {
+                    if (!data) return;
+                    if (typeof data.zoom === 'number' && !pinchActive) {
+                        const clamped = Math.max(100, Math.min(220, Math.round(data.zoom)));
+                        const sl = document.getElementById('zoomSlider');
+                        const zb = document.getElementById('zoomBadge');
+                        if (sl && zb && document.activeElement !== sl) {
+                            sl.value = clamped;
+                            zb.textContent = clamped + '%';
+                        }
+                    }
                 }
 
                 function stopHeartbeat() {
@@ -639,12 +695,31 @@ final class LocalExportServer {
                             pongDeadlineTimer = setTimeout(() => {
                                 wsAlive = false;
                                 forceReconnectWS();
-                            }, 2500);
+                            }, 1500);
                         } catch (e) {
                             wsAlive = false;
                             forceReconnectWS();
                         }
-                    }, 4000);
+                    }, 2500);
+                }
+
+                function probeWSHealth(timeoutMs = 700) {
+                    if (!ws || ws.readyState !== 1) {
+                        forceReconnectWS();
+                        return;
+                    }
+                    try {
+                        ws.send('{"type":"ping"}');
+                        if (pongDeadlineTimer) clearTimeout(pongDeadlineTimer);
+                        pongDeadlineTimer = setTimeout(() => {
+                            wsAlive = false;
+                            setStatusBadge('Respaldo HTTP · Reconectando...', false);
+                            forceReconnectWS();
+                        }, timeoutMs);
+                    } catch (e) {
+                        wsAlive = false;
+                        forceReconnectWS();
+                    }
                 }
 
                 function forceReconnectWS() {
@@ -663,28 +738,29 @@ final class LocalExportServer {
                 function connectWS() {
                     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
                     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const badge = document.getElementById('status');
-                    badge.textContent = 'Conectando...';
-                    badge.className = 'badge';
+                    setStatusBadge('Conectando...', false);
 
                     const sock = new WebSocket(proto + '//' + location.host + '/ws');
                     ws = sock;
                     sock.onopen = () => {
                         if (ws !== sock) return;
                         wsAlive = true;
-                        badge.textContent = 'Conectado';
-                        badge.className = 'badge ok';
+                        lastPongAt = Date.now();
+                        setStatusBadge('Conectado', true);
                         startHeartbeat();
+                        try { sock.send('{"type":"ping"}'); } catch (e) {}
+                        flushReliableQueue();
                     };
                     sock.onmessage = (ev) => {
                         if (ws !== sock) return;
                         wsAlive = true;
+                        lastPongAt = Date.now();
                         if (pongDeadlineTimer) { clearTimeout(pongDeadlineTimer); pongDeadlineTimer = null; }
                         try {
                             const msg = JSON.parse(ev.data);
                             if (msg && msg.type === 'pong') {
-                                badge.textContent = 'Conectado';
-                                badge.className = 'badge ok';
+                                setStatusBadge('Conectado', true);
+                                syncStateFromServer(msg);
                             }
                         } catch (e) {}
                     };
@@ -696,10 +772,9 @@ final class LocalExportServer {
                         if (ws !== sock) return;
                         wsAlive = false;
                         stopHeartbeat();
-                        badge.textContent = 'Reconectando...';
-                        badge.className = 'badge';
+                        setStatusBadge(reliableQueue.length > 0 ? 'Cola HTTP activa...' : 'Reconectando...', false);
                         if (!reconnectTimer) {
-                            reconnectTimer = setTimeout(connectWS, 700);
+                            reconnectTimer = setTimeout(connectWS, 600);
                         }
                     };
                 }
@@ -708,19 +783,9 @@ final class LocalExportServer {
                 function handleResume() {
                     if (document.visibilityState === 'hidden') return;
                     requestWakeLock();
-                    if (!ws || ws.readyState !== 1 || !wsAlive) {
-                        forceReconnectWS();
-                    } else {
-                        try {
-                            ws.send('{"type":"ping"}');
-                            if (pongDeadlineTimer) clearTimeout(pongDeadlineTimer);
-                            pongDeadlineTimer = setTimeout(() => {
-                                wsAlive = false;
-                                forceReconnectWS();
-                            }, 1200);
-                        } catch (e) {
-                            forceReconnectWS();
-                        }
+                    flushReliableQueue();
+                    if (!ws || ws.readyState !== 1 || !wsAlive || (Date.now() - lastPongAt > 2000)) {
+                        probeWSHealth(650);
                     }
                 }
                 document.addEventListener('visibilitychange', handleResume);
@@ -728,8 +793,71 @@ final class LocalExportServer {
                 window.addEventListener('focus', handleResume);
                 window.addEventListener('online', handleResume);
 
+                function isSocketSuspect() {
+                    return !ws || ws.readyState !== 1 || !wsAlive || (Date.now() - lastPongAt > 4500);
+                }
+
+                async function flushReliableQueue() {
+                    if (flushingQueue || reliableQueue.length === 0) return;
+                    flushingQueue = true;
+                    while (reliableQueue.length > 0) {
+                        const item = reliableQueue[0];
+                        try {
+                            const res = await fetch('/cmd', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(item.payload),
+                                keepalive: true
+                            });
+                            if (!res.ok) throw new Error('HTTP ' + res.status);
+                            const data = await res.json().catch(() => null);
+                            syncStateFromServer(data);
+                            reliableQueue.shift();
+                            if (!ws || ws.readyState !== 1) connectWS();
+                        } catch (e) {
+                            item.attempts = (item.attempts || 0) + 1;
+                            if (item.attempts >= 12) {
+                                reliableQueue.shift();
+                            } else {
+                                const delay = Math.min(2000, 250 * Math.pow(1.45, item.attempts - 1));
+                                flushingQueue = false;
+                                if (queueRetryTimer) clearTimeout(queueRetryTimer);
+                                queueRetryTimer = setTimeout(flushReliableQueue, delay);
+                                return;
+                            }
+                        }
+                    }
+                    flushingQueue = false;
+                }
+
+                function sendHighFreqHTTP(obj) {
+                    httpFallbackMovePending = obj;
+                    if (httpFallbackMoveInFlight) return;
+                    httpFallbackMoveInFlight = true;
+                    const drain = () => {
+                        const next = httpFallbackMovePending;
+                        httpFallbackMovePending = null;
+                        if (!next) { httpFallbackMoveInFlight = false; return; }
+                        fetch('/cmd', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(next),
+                            keepalive: true
+                        }).then(r => r.json().catch(() => null))
+                          .then(data => syncStateFromServer(data))
+                          .catch(() => {})
+                          .finally(() => {
+                              if (!ws || ws.readyState !== 1) forceReconnectWS();
+                              if (httpFallbackMovePending) { drain(); } else { httpFallbackMoveInFlight = false; }
+                          });
+                    };
+                    drain();
+                }
+
                 function send(obj) {
-                    if (ws && ws.readyState === 1 && wsAlive) {
+                    requestWakeLock();
+                    const isMotion = (obj.type === 'move' || obj.type === 'scroll');
+                    if (!isSocketSuspect()) {
                         try {
                             ws.send(JSON.stringify(obj));
                             return;
@@ -737,17 +865,23 @@ final class LocalExportServer {
                             wsAlive = false;
                             forceReconnectWS();
                         }
+                    } else if (ws && ws.readyState === 1 && Date.now() - lastPongAt > 2500) {
+                        probeWSHealth(600);
                     }
-                    fetch('/cmd', { method: 'POST', body: JSON.stringify(obj), keepalive: true })
-                        .then(() => { if (!ws || ws.readyState !== 1) forceReconnectWS(); })
-                        .catch(() => {});
+
+                    if (isMotion) {
+                        sendHighFreqHTTP(obj);
+                    } else {
+                        reliableQueue.push({ payload: obj, attempts: 0 });
+                        flushReliableQueue();
+                    }
                 }
                 function act(name) { send({ type: 'action', name }); }
 
                 const zoomSlider = document.getElementById('zoomSlider');
                 const zoomBadge = document.getElementById('zoomBadge');
                 function applyZoomPct(pct) {
-                    const clamped = Math.max(75, Math.min(250, Math.round(pct)));
+                    const clamped = Math.max(100, Math.min(220, Math.round(pct)));
                     zoomSlider.value = clamped;
                     zoomBadge.textContent = clamped + '%';
                     send({ type: 'zoom', value: clamped / 100.0 });
@@ -786,6 +920,8 @@ final class LocalExportServer {
 
                 pad.addEventListener('touchstart', e => {
                     e.preventDefault();
+                    requestWakeLock();
+                    if (Date.now() - lastPongAt > 2500) probeWSHealth(650);
                     lastTouches = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }));
                     if (e.touches.length === 1) {
                         tapStart = Date.now();
@@ -821,7 +957,7 @@ final class LocalExportServer {
                         }
                         if (pinchActive) {
                             const scale = curDist / Math.max(24, pinchStartDist);
-                            const nextPct = Math.max(75, Math.min(250, Math.round((pinchStartZoom * scale * 100) / 5) * 5));
+                            const nextPct = Math.max(100, Math.min(220, Math.round((pinchStartZoom * scale * 100) / 5) * 5));
                             const now = Date.now();
                             if (nextPct !== lastPinchPct && (now - lastPinchSentAt >= 55 || Math.abs(nextPct - lastPinchPct) >= 5)) {
                                 lastPinchSentAt = now;
@@ -901,7 +1037,11 @@ final class LocalExportServer {
                 let kbComposing = false;
                 kbInput.addEventListener('focus', () => {
                     requestWakeLock();
-                    if (!ws || ws.readyState !== 1 || !wsAlive) forceReconnectWS();
+                    if (isSocketSuspect()) {
+                        forceReconnectWS();
+                    } else if (Date.now() - lastPongAt > 2000) {
+                        probeWSHealth(600);
+                    }
                 });
                 kbInput.addEventListener('compositionstart', () => { kbComposing = true; });
                 kbInput.addEventListener('compositionend', () => {

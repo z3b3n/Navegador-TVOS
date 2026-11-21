@@ -194,6 +194,26 @@ static NSString *TVBridgeUserScriptSource(void) {
             "}"
             "return null;"
         "}"
+        "function tvRectCoordsInFrame(el, lx, ly) {"
+            "var r = el.getBoundingClientRect();"
+            "var cs = null;"
+            "try { cs = el.ownerDocument && el.ownerDocument.defaultView ? el.ownerDocument.defaultView.getComputedStyle(el) : getComputedStyle(el); } catch (e) {}"
+            "var bl = cs ? (parseFloat(cs.borderLeftWidth) || 0) : (el.clientLeft || 0);"
+            "var bt = cs ? (parseFloat(cs.borderTopWidth) || 0) : (el.clientTop || 0);"
+            "var br = cs ? (parseFloat(cs.borderRightWidth) || 0) : 0;"
+            "var bb = cs ? (parseFloat(cs.borderBottomWidth) || 0) : 0;"
+            "var pl = cs ? (parseFloat(cs.paddingLeft) || 0) : 0;"
+            "var pt = cs ? (parseFloat(cs.paddingTop) || 0) : 0;"
+            "var pr = cs ? (parseFloat(cs.paddingRight) || 0) : 0;"
+            "var pb = cs ? (parseFloat(cs.paddingBottom) || 0) : 0;"
+            "var cw = (el.clientWidth || 0) - pl - pr;"
+            "var ch = (el.clientHeight || 0) - pt - pb;"
+            "var rw = r.width - bl - br - pl - pr;"
+            "var rh = r.height - bt - bb - pt - pb;"
+            "var sx = (cw > 1 && rw > 1) ? (cw / rw) : 1.0;"
+            "var sy = (ch > 1 && rh > 1) ? (ch / rh) : 1.0;"
+            "return { x: (lx - r.left - bl - pl) * sx, y: (ly - r.top - bt - pt) * sy };"
+        "}"
         "window.addEventListener('message', function(ev) {"
             "var d = ev && ev.data;"
             "if (!d || d.__tvBrowserBridge !== true) return;"
@@ -201,17 +221,30 @@ static NSString *TVBridgeUserScriptSource(void) {
             "if (!isFinite(rx) || !isFinite(ry)) return;"
             "var el = tvDeepHit(rx, ry);"
             "if (!el) return;"
+            "if (el.tagName && el.tagName.toLowerCase() === 'iframe') {"
+                "try {"
+                    "var mapped = tvRectCoordsInFrame(el, rx, ry);"
+                    "if (el.contentWindow) {"
+                        "el.contentWindow.postMessage({ __tvBrowserBridge: true, action: d.action, rx: mapped.x, ry: mapped.y }, '*');"
+                    "}"
+                "} catch (e) {}"
+                "return;"
+            "}"
+            "if (d.action === 'hover') {"
+                "if (window.__tvBrowserLastHover !== el) {"
+                    "try {"
+                        "if (window.__tvBrowserLastHover && window.__tvBrowserLastHover.dispatchEvent) {"
+                            "window.__tvBrowserLastHover.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, clientX: rx, clientY: ry }));"
+                        "}"
+                        "el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: rx, clientY: ry }));"
+                    "} catch (e) {}"
+                    "window.__tvBrowserLastHover = el;"
+                "}"
+                "try { el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: rx, clientY: ry })); } catch (e) {}"
+                "return;"
+            "}"
             "if (d.action === 'click') {"
                 "window.__tvBrowserLastClick = Date.now();"
-                "if (el.tagName && el.tagName.toLowerCase() === 'iframe') {"
-                    "try {"
-                        "var r = el.getBoundingClientRect();"
-                        "if (el.contentWindow) {"
-                            "el.contentWindow.postMessage({ __tvBrowserBridge: true, action: 'click', rx: rx - r.left, ry: ry - r.top }, '*');"
-                        "}"
-                    "} catch (e) {}"
-                    "return;"
-                "}"
                 "var target = tvClosest(el, 'a[href], a, button, input, select, textarea, label, summary, [role=\"button\"], [role=\"link\"], [role=\"tab\"], [role=\"menuitem\"], [onclick], [tabindex]') || el;"
                 "var opts = { bubbles: true, cancelable: true, view: window, clientX: rx, clientY: ry, screenX: rx, screenY: ry, button: 0, buttons: 1 };"
                 "try { if (typeof PointerEvent === 'function') { var p = Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, opts); target.dispatchEvent(new PointerEvent('pointerover', p)); target.dispatchEvent(new PointerEvent('pointerdown', p)); } } catch (e) {}"
@@ -349,7 +382,7 @@ static NSString *TVBridgeUserScriptSource(void) {
 
             id allocView = [wkClass alloc];
             UIView *wkView = ((id (*)(id, SEL, CGRect, id))objc_msgSend)(allocView, @selector(initWithFrame:configuration:), frame, config);
-            wkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            wkView.autoresizingMask = UIViewAutoresizingNone;
             wkView.backgroundColor = [UIColor blackColor];
 
             if ([wkView respondsToSelector:@selector(setNavigationDelegate:)]) {
@@ -365,8 +398,11 @@ static NSString *TVBridgeUserScriptSource(void) {
             _webView = wkView;
             _isUsingWKWebView = YES;
             UIScrollView *sv = self.scrollView;
-            if (sv && [sv respondsToSelector:@selector(setContentInsetAdjustmentBehavior:)]) {
-                sv.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+            if (sv) {
+                if ([sv respondsToSelector:@selector(setContentInsetAdjustmentBehavior:)]) {
+                    sv.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+                }
+                sv.alwaysBounceHorizontal = NO;
             }
             [TVScriptMessageRouter registerEngine:self forWebView:wkView];
             [self startObservingWKWebView:wkView];

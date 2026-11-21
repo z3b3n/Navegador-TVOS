@@ -1,43 +1,44 @@
-# Platanet para Apple TV 4K (tvOS) · v2.1
+# Platanet para Apple TV 4K (tvOS) · v2.2
 
-Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para acercar la experiencia de **Safari** al televisor: barra superior automática al llegar arriba (y ocultación automática tras inactividad), zoom nativo centrado (`140%` por defecto para TV 55"), Página de Inicio con gestión completa de accesos directos, pestañas múltiples, **WebApps en pantalla completa**, soporte de **teclado Bluetooth**, **control remoto desde iPhone/PC con ratón, trackpad y pellizco**, reproductor de vídeo nativo y bloqueador de anuncios.
+Navegador web avanzado para **Apple TV 4K (tvOS 15+)** diseñado para pantalla grande de salón (TV 4K 55"): física de puntero exponencial y scroll progresivo con easing suave, HUD superior inteligente (`5 s` de auto-ocultación) accesible desde cualquier parte de la página, zoom centrado real (`140%` por defecto, `100%–220%`), Página de Inicio visual con favicons y reordenación completa, navegación estricta con Menú/Focus Engine sin callejones, WebApps en pantalla completa, teclado Bluetooth y remoto iPhone PWA a prueba de bloqueos.
 
 ---
 
-## Novedades principales (v2.1)
+## Novedades principales (v2.2)
 
-* **Interfaz estilo Safari inteligente y despejada:**
-  * Sin barra fija estorbando durante la navegación: al llevar el puntero al borde superior (estés en la parte que estés de la página, sin tener que subir el scroll hasta arriba) se despliega al instante la barra grande de Safari (`◀`, `▶`, `⌂ Inicio`, búsqueda/URL con dominio SSL, `A-` / `%` / `A+`, `↻/✕`, `★`, `📺 Vídeo`, `↕ Scroll` / `🎯 Cursor`, `❏ Pestañas`, `⋯ Menú`, `Listo`), y desaparece automáticamente tras ~6,5 s sin usarla (o pulsando `↓`, `Menú` o `Listo`).
-  * **Zoom nativo siempre centrado (75% – 250%, `140%` por defecto para TV 55"):** escala todo el viewport manteniendo cualquier página centrada sin descuadres laterales.
-  * **Scroll progresivo y suave:** al acercar el puntero al borde inferior/superior la página avanza progresivamente con suavidad a 60 fps para parar en el punto exacto sin saltos bruscos.
-  * **Página de Inicio (`⌂`):** añade accesos directos de la página actual o por URL, edítalos, reordénalos o elimínalos fácilmente desde **+ Añadir acceso** y **Editar accesos**.
-  * **Arranque directo en Google** (o en tu **WebApp automática** si fijas una) + barra de progreso fina azul.
-* **Control de cursor y scroll:**
-  * **Play/Pausa (toque corto)** alterna `Modo Cursor ↔ Modo Scroll` de forma fiable.
-  * **Mantener pulsado Seleccionar / OK (≥ 0,6 s)** abre el menú rápido del mando desde cualquier punto de la página.
-  * **Pulsación larga en Play/Pausa o Menú (≥ 0,45 s)** abre o cierra la barra Safari **en cualquier momento**, aunque tengas historial abierto.
-  * **Cursor adaptativo con `:hover` en tiempo real**, soporte nativo de `<select>` desplegables, `<iframe>`s / Shadow DOM y clic estabilizado al soltar.
+* **HUD superior "TV-First" y barra accesible desde cualquier altura:**
+  * Invoca u oculta la barra (`◀`, `▶`, `⌂ Inicio`, búsqueda/URL SSL, `A-` / `%` / `A+`, `↻/✕`, `☆ +Inicio` / `★ En Inicio`, `📺 Vídeo`, `↕ Scroll` / `🎯 Puntero`, `❏ Pestañas`, `⋯ Menú`, `Listo`) mediante **Play/Pausa largo (0,45 s)** / **OK largo (0,50 s)** o manteniendo el puntero **0,35 s** en los **últimos 12 pt del borde superior**, estés donde estés de la web.
+  * Desaparece suavemente tras **5 segundos** de inactividad (o al pulsar `↓`, `Menú` o `Listo`).
+* **Física de puntero y scroll de precisión:**
+  * Cruceta con micro-paso inicial (`4,5 pt`) para enlaces pequeños y aceleración exponencial controlada para cruzar la pantalla, además de ganancia no lineal en touchpad.
+  * Zona gradual en el 10–12% superior/inferior con frenado suave (*easing*) al soltar para parar en la línea exacta de lectura.
+  * **Play/Pausa (toque corto)** o el botón **`↕ Scroll`** alternan entre *Modo Puntero* y *Modo Scroll* con badge visual discreto.
+* **Zoom centrado real (`100%–220%`, `140%` por defecto) y coordenadas 1:1:**
+  * Ancho entero alineado con `bounds` + `CGAffineTransform` centrado y recorte de overflow horizontal fantasma.
+  * Mapeo geométrico exacto sobre `WKWebView` en `elementFromPoint`, `:hover` y clics (Shadow DOM, `iframe`s con escala/bordes y puente `postMessage` también en hover).
+* **Navegación nativa estricta con `Menú` y Focus Engine blindado:**
+  * `Menú` cierra modal/barra abierta → retrocede historial → cierra pestaña secundaria → sale limpiamente a Apple TV en la raíz sin historial.
+  * Rescate automático de foco al deshabilitar botones o vaciar listas/secciones.
+* **Página de Inicio (`⌂`) con favicons y edición completa:**
+  * Tarjetas estilo Apple TV con favicon en caché y color de dominio; botón **`☆ +Inicio`** directo en la barra y reordenación (`⬅`, `➡`, `⬆`, editar, eliminar) desde Inicio.
 * **WebApps (Modo App en pantalla completa):**
   * Convierte cualquier web en una **WebApp** desde `⋯ → Guardar como WebApp` (sin barras, con su propio Zoom, User-Agent y AdBlock, y opción de **auto-abrir al arrancar Platanet**).
 * **Pestañas y Motor WebKit robusto:**
-  * **Gestor de pestañas (`❏`)** con soporte real de `target="_blank"` y pop-ups OAuth (Google, Microsoft, GitHub) conservando `window.opener`.
+  * **Gestor de pestañas (`❏`)** con soporte real de `target="_blank"` y pop-ups OAuth conservando `window.opener`.
   * Observación KVO en tiempo real de URL, título y progreso para **SPAs modernas**, diálogos JS, página de error con *Reintentar*, selector de **User-Agent (Mac / iPad / iPhone)**, limpieza de caché/cookies y regla de bloqueo nativo (`WKContentRuleList`).
-  * **Reproductor de vídeo TV (`AVPlayerViewController`)** para reproducir flujos `<video>` MP4 / HLS a pantalla completa con el Siri Remote.
+  * **Reproductor de vídeo TV (`AVPlayerViewController`)** para `<video>` MP4/HLS.
 * **Teclado Bluetooth y Ratón / Trackpad Remoto (PWA + WebSocket):**
-  * **Teclado Bluetooth:** escritura directa en cualquier campo web enfocado + atajos Safari (`⌘L`, `⌘T`, `⌘W`, `⌘R`, `⌘[`, `⌘]`, `⌘+`/`⌘-`/`⌘0`, `Esc`, `Espacio`, `RePág`/`AvPág`).
-  * **Ratón, Trackpad y Gestos desde iPhone/PC:** abre `⋯ → Control Remoto QR` y escanea el QR desde tu **iPhone, iPad, Mac o PC** (con reconexión automática, Wake Lock, teclado en directo, pellizco de 2 dedos para zoom, y exportación/importación de marcadores HTML/JSON y contraseñas CSV). *(También incluye soporte de `GCMouse` para dispositivos HID compatibles.)*
+  * **Ratón, Trackpad y Gestos desde iPhone/PC:** sonda rápida tras desbloqueo de pantalla, **Wake Lock** reactivado en cada toque, sincronización de estado (`zoom` / `modo`) y **cola de reintento HTTP `/cmd` con backoff exponencial** si el WebSocket duerme tras bloquear el iPhone.
 
 ---
 
 ## Controles
 
 ### Siri Remote / Mando de TV compatible / Mando iPhone
-* **Subir el puntero al borde superior (desde cualquier parte de la web):** Despliega al instante la barra completa de Safari sin mover ni subir la página; desaparece sola tras ~6,5 s sin usarla (o al pulsar `↓`, `Menú` o `Listo`).
-* **Mantener pulsado Seleccionar / OK (≥ 0,6 s):** Abre el **Menú rápido del mando** desde cualquier punto de la página (Buscar/URL, Barra completa, Escala/Zoom, Cursor/Scroll, Inicio, Pestañas, Control Remoto iPhone).
-* **Deslizar en el touchpad o cruceta (D-Pad):** Mueve el cursor virtual (en *Modo Cursor*, bajando suavemente al acercarlo al borde inferior) o hace scroll libre arriba/abajo (en *Modo Scroll*, accesible con **Play/Pausa** o el botón **`↕ Scroll`** de la barra).
-* **Play / Pausa (toque corto):** Alterna entre **Modo Cursor** y **Modo Scroll**.
-* **Menú (toque corto):** Atrás en el historial (o cierra la pestaña secundaria); en la pantalla raíz sin historial sale al menú principal de Apple TV.
-* **Play / Pausa (pulsación larga ≥ 0,45 s):** Abre o cierra manualmente la **barra Safari** desde cualquier página o WebApp.
+* **Mantener el puntero en el borde superior (`12 pt`) durante `0,35 s`, o mantener OK (`0,5 s`) / Play-Pausa (`0,45 s`):** Abre o cierra el **HUD superior** desde cualquier posición de la página; se oculta solo tras **5 s** sin usarlo (o pulsando `↓`, `Menú` o `Listo`).
+* **Play / Pausa (toque corto):** Alterna entre **Modo Puntero** y **Modo Scroll** con indicador visual temporal abajo a la derecha.
+* **Deslizar en touchpad o cruceta (D-Pad):** En *Modo Puntero*, micro-movimiento de precisión al pulsar y aceleración exponencial progresiva al mantener, con scroll gradual en las franjas superior/inferior y frenado suave al soltar. En *Modo Scroll*, desplaza la página con inercia nativa.
+* **Menú / Atrás (regla estricta):** Cierra barra/modal → retrocede en el historial → cierra pestaña secundaria → sale a Apple TV cuando estás en la raíz sin historial.
 
 ### Teclado Bluetooth físico
 * **Escribir directamente** cuando un campo de texto web está enfocado (incluye `Backspace`, `Enter`, `Tab`, `Esc`).

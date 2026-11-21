@@ -84,10 +84,11 @@ final class BrowserStore {
     var pageZoom: Double {
         get {
             let val = UserDefaults.standard.double(forKey: zoomKey)
-            return val > 0 ? val : Self.defaultTVZoom
+            let resolved = val > 0 ? val : Self.defaultTVZoom
+            return max(1.0, min(2.2, resolved))
         }
         set {
-            let clamped = max(0.75, min(2.5, newValue))
+            let clamped = max(1.0, min(2.2, newValue))
             UserDefaults.standard.set(clamped, forKey: zoomKey)
         }
     }
@@ -182,6 +183,15 @@ final class BrowserStore {
         guard bookmarks.indices.contains(index), index > 0 else { return }
         let item = bookmarks.remove(at: index)
         bookmarks.insert(item, at: 0)
+        saveBookmarks()
+    }
+
+    func moveBookmark(from sourceIndex: Int, to destinationIndex: Int) {
+        guard bookmarks.indices.contains(sourceIndex),
+              bookmarks.indices.contains(destinationIndex),
+              sourceIndex != destinationIndex else { return }
+        let item = bookmarks.remove(at: sourceIndex)
+        bookmarks.insert(item, at: destinationIndex)
         saveBookmarks()
     }
 

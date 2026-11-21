@@ -1,5 +1,117 @@
 import UIKit
 
+private final class StartPageFaviconCache {
+    static let shared = StartPageFaviconCache()
+
+    private let memoryCache = NSCache<NSString, UIImage>()
+    private var inFlight: [String: [(UIImage?) -> Void]] = [:]
+    private let diskDirectory: URL
+
+    private init() {
+        memoryCache.countLimit = 80
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        diskDirectory = caches.appendingPathComponent("platanet_favicons", isDirectory: true)
+        try? FileManager.default.createDirectory(at: diskDirectory, withIntermediateDirectories: true)
+    }
+
+    static func domainTintColor(for host: String) -> UIColor {
+        let lower = host.lowercased()
+        if lower.contains("google") { return UIColor(red: 0.16, green: 0.45, blue: 0.96, alpha: 1.0) }
+        if lower.contains("youtube") { return UIColor(red: 0.86, green: 0.14, blue: 0.16, alpha: 1.0) }
+        if lower.contains("github") { return UIColor(red: 0.36, green: 0.24, blue: 0.72, alpha: 1.0) }
+        if lower.contains("wikipedia") { return UIColor(red: 0.30, green: 0.38, blue: 0.48, alpha: 1.0) }
+        if lower.contains("duckduckgo") { return UIColor(red: 0.87, green: 0.35, blue: 0.14, alpha: 1.0) }
+        if lower.contains("netflix") { return UIColor(red: 0.78, green: 0.08, blue: 0.14, alpha: 1.0) }
+        if lower.contains("twitch") { return UIColor(red: 0.52, green: 0.22, blue: 0.85, alpha: 1.0) }
+        if lower.contains("amazon") { return UIColor(red: 0.82, green: 0.48, blue: 0.08, alpha: 1.0) }
+
+        let palette: [UIColor] = [
+            UIColor(red: 0.14, green: 0.48, blue: 0.92, alpha: 1.0),
+            UIColor(red: 0.08, green: 0.62, blue: 0.72, alpha: 1.0),
+            UIColor(red: 0.42, green: 0.32, blue: 0.88, alpha: 1.0),
+            UIColor(red: 0.14, green: 0.65, blue: 0.46, alpha: 1.0),
+            UIColor(red: 0.82, green: 0.38, blue: 0.18, alpha: 1.0),
+            UIColor(red: 0.72, green: 0.22, blue: 0.46, alpha: 1.0)
+        ]
+        var hash = 5381
+        for byte in lower.utf8 {
+            hash = ((hash << 5) &+ hash) &+ Int(byte)
+        }
+        return palette[abs(hash) % palette.count]
+    }
+
+    func loadFavicon(for urlString: String, completion: @escaping (UIImage?) -> Void) {
+        guard let url = URL(string: urlString),
+              let host = url.host?.lowercased(),
+              !host.isEmpty else {
+            completion(nil)
+            return
+        }
+
+        let cacheKey = host as NSString
+        if let cached = memoryCache.object(forKey: cacheKey) {
+            completion(cached)
+            return
+        }
+
+        let safeName = host.replacingOccurrences(of: "[^a-z0-9.-]", with: "_", options: .regularExpression)
+        let fileURL = diskDirectory.appendingPathComponent("\(safeName).png")
+        if let data = try? Data(contentsOf: fileURL), let img = UIImage(data: data) {
+            memoryCache.setObject(img, forKey: cacheKey)
+            completion(img)
+            return
+        }
+
+        if inFlight[host] != nil {
+            inFlight[host]?.append(completion)
+            return
+        }
+        inFlight[host] = [completion]
+
+        let candidates: [URL] = [
+            URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=128"),
+            URL(string: "https://\(host)/apple-touch-icon.png"),
+            URL(string: "https://\(host)/favicon.ico")
+        ].compactMap { $0 }
+
+        fetchFirstValid(from: candidates) { [weak self] image in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let image = image {
+                    self.memoryCache.setObject(image, forKey: cacheKey)
+                    if let png = image.pngData() {
+                        try? png.write(to: fileURL)
+                    }
+                }
+                let callbacks = self.inFlight.removeValue(forKey: host) ?? []
+                callbacks.forEach { $0(image) }
+            }
+        }
+    }
+
+    private func fetchFirstValid(from urls: [URL], index: Int = 0, completion: @escaping (UIImage?) -> Void) {
+        guard urls.indices.contains(index) else {
+            completion(nil)
+            return
+        }
+        var request = URLRequest(url: urls[index], cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 4.5)
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            if let http = response as? HTTPURLResponse,
+               (200..<300).contains(http.statusCode),
+               let data = data,
+               let image = UIImage(data: data),
+               image.size.width >= 16, image.size.height >= 16 {
+                completion(image)
+                return
+            }
+            self?.fetchFirstValid(from: urls, index: index + 1, completion: completion)
+        }.resume()
+    }
+}
+
 final class StartPageViewController: UIViewController {
     var onSearchTapped: (() -> Void)?
     var onSelectURL: ((URL) -> Void)?
@@ -32,7 +144,7 @@ final class StartPageViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 0.06, green: 0.08, blue: 0.13, alpha: 1.0)
+        view.backgroundColor = UIColor(red: 0.05, green: 0.07, blue: 0.13, alpha: 1.0)
         rebuildSections()
         setupHeader()
         setupCollectionView()
@@ -52,6 +164,12 @@ final class StartPageViewController: UIViewController {
         rebuildSections()
         updateEditButtonAppearance()
         collectionView.reloadData()
+        // Validate Focus Engine after reloads so removing the last item/section never leaves focus orphaned
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.setNeedsFocusUpdate()
+            self.updateFocusIfNeeded()
+        }
     }
 
     private func rebuildSections() {
@@ -71,7 +189,7 @@ final class StartPageViewController: UIViewController {
         view.addSubview(titleLabel)
 
         configureHeaderButton(addShortcutButton, title: "+ Añadir acceso", tint: UIColor.systemBlue.withAlphaComponent(0.55), action: #selector(addShortcutTapped))
-        configureHeaderButton(editShortcutsButton, title: "Editar", tint: UIColor.white.withAlphaComponent(0.14), action: #selector(toggleEditTapped))
+        configureHeaderButton(editShortcutsButton, title: "Editar accesos", tint: UIColor.white.withAlphaComponent(0.14), action: #selector(toggleEditTapped))
         configureHeaderButton(closeButton, title: "Volver al navegador", tint: UIColor.white.withAlphaComponent(0.14), action: #selector(closeTapped))
 
         headerButtonsStack.axis = .horizontal
@@ -140,15 +258,15 @@ final class StartPageViewController: UIViewController {
 
     private func setupCollectionView() {
         let layout = UICollectionViewCompositionalLayout { _, _ in
-            let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.2), heightDimension: .absolute(150))
+            let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.2), heightDimension: .absolute(156))
             let item = NSCollectionLayoutItem(layoutSize: itemSize)
             item.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10)
 
-            let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(166))
+            let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(172))
             let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
 
             let section = NSCollectionLayoutSection(group: group)
-            section.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 50, bottom: 24, trailing: 50)
+            section.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 50, bottom: 26, trailing: 50)
             let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(44))
             let header = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: headerSize,
@@ -162,7 +280,7 @@ final class StartPageViewController: UIViewController {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = .clear
-        collectionView.remembersLastFocusedIndexPath = true
+        collectionView.remembersLastFocusedIndexPath = false
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(StartPageTileCell.self, forCellWithReuseIdentifier: StartPageTileCell.reuseId)
@@ -304,21 +422,34 @@ final class StartPageViewController: UIViewController {
     }
 
     private func presentFavoriteOptions(at index: Int) {
+        let count = BrowserStore.shared.bookmarks.count
         guard BrowserStore.shared.bookmarks.indices.contains(index) else { return }
         let bm = BrowserStore.shared.bookmarks[index]
         let alert = UIAlertController(title: bm.title, message: bm.urlString, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "↗ Abrir página", style: .default) { [weak self] _ in
             if let url = URL(string: bm.urlString) { self?.onSelectURL?(url) }
         })
-        alert.addAction(UIAlertAction(title: "✎ Editar nombre o URL", style: .default) { [weak self] _ in
-            self?.presentBookmarkEditor(editingIndex: index, initialTitle: bm.title, initialURL: bm.urlString)
-        })
         if index > 0 {
+            alert.addAction(UIAlertAction(title: "⬅ Mover antes", style: .default) { [weak self] _ in
+                BrowserStore.shared.moveBookmark(from: index, to: index - 1)
+                self?.reloadStartPageData()
+            })
+        }
+        if index + 1 < count {
+            alert.addAction(UIAlertAction(title: "➡ Mover después", style: .default) { [weak self] _ in
+                BrowserStore.shared.moveBookmark(from: index, to: index + 1)
+                self?.reloadStartPageData()
+            })
+        }
+        if index > 1 {
             alert.addAction(UIAlertAction(title: "⬆ Mover al principio", style: .default) { [weak self] _ in
                 BrowserStore.shared.moveBookmarkToFront(at: index)
                 self?.reloadStartPageData()
             })
         }
+        alert.addAction(UIAlertAction(title: "✎ Editar nombre o URL", style: .default) { [weak self] _ in
+            self?.presentBookmarkEditor(editingIndex: index, initialTitle: bm.title, initialURL: bm.urlString)
+        })
         alert.addAction(UIAlertAction(title: "⊞ Guardar como WebApp (Pantalla completa)", style: .default) { [weak self] _ in
             _ = BrowserStore.shared.saveWebApp(
                 title: bm.title,
@@ -341,7 +472,7 @@ final class StartPageViewController: UIViewController {
     private func presentAddShortcutMenu() {
         let alert = UIAlertController(
             title: "Añadir acceso directo",
-            message: "Guarda una página en Favoritos para abrirla con un clic desde Inicio.",
+            message: "Guarda una página en Favoritos para abrirla con 2 toques desde Inicio.",
             preferredStyle: .alert
         )
 
@@ -458,10 +589,10 @@ extension StartPageViewController: UICollectionViewDataSource, UICollectionViewD
                 : "WebApps (Pantalla completa) · Mantén OK para opciones"
         case .favorites:
             header.titleLabel.text = isEditingShortcuts
-                ? "Modo Edición · Pulsa un favorito para editarlo, moverlo o eliminarlo"
+                ? "Modo Edición · Pulsa un favorito para moverlo, editarlo o eliminarlo"
                 : "Favoritos · Accesos directos (Mantén OK o pulsa 'Editar accesos')"
         case .recent:
-            header.titleLabel.text = "Visitados recientemente (Mantén OK para guardar en Favoritos)"
+            header.titleLabel.text = "Visitados recientemente (Mantén OK para fijar en Favoritos)"
         }
         return header
     }
@@ -473,18 +604,18 @@ extension StartPageViewController: UICollectionViewDataSource, UICollectionViewD
             let app = BrowserStore.shared.webApps[indexPath.item]
             let badge = isEditingShortcuts ? "✕ EDITAR" : (app.autoLaunch ? "AUTO" : "APP")
             let badgeColor: UIColor = isEditingShortcuts ? .systemRed : .systemIndigo
-            cell.configure(title: app.title, urlString: app.urlString, badge: badge, badgeColor: badgeColor, tint: .systemIndigo)
+            cell.configure(title: app.title, urlString: app.urlString, badge: badge, badgeColor: badgeColor)
         case .favorites:
             if indexPath.item >= BrowserStore.shared.bookmarks.count {
                 cell.configureAddTile()
             } else {
                 let bm = BrowserStore.shared.bookmarks[indexPath.item]
                 let badge = isEditingShortcuts ? "✕ EDITAR" : nil
-                cell.configure(title: bm.title, urlString: bm.urlString, badge: badge, badgeColor: .systemRed, tint: .systemBlue)
+                cell.configure(title: bm.title, urlString: bm.urlString, badge: badge, badgeColor: .systemRed)
             }
         case .recent:
             let hist = recentItems()[indexPath.item]
-            cell.configure(title: hist.title, urlString: hist.urlString, badge: nil, badgeColor: .systemTeal, tint: .systemTeal)
+            cell.configure(title: hist.title, urlString: hist.urlString, badge: nil, badgeColor: .systemTeal)
         }
         return cell
     }
@@ -543,10 +674,12 @@ private final class StartPageTileCell: UICollectionViewCell {
 
     private let card = UIView()
     private let iconBadge = UILabel()
+    private let faviconView = UIImageView()
     private let tagLabel = UILabel()
     private let titleLabel = UILabel()
     private let hostLabel = UILabel()
     private var unfocusedCardBackground = UIColor.white.withAlphaComponent(0.10)
+    private var representedURLString: String?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -555,15 +688,26 @@ private final class StartPageTileCell: UICollectionViewCell {
         card.layer.cornerRadius = 18
         card.layer.borderWidth = 2.5
         card.layer.borderColor = UIColor.clear.cgColor
+        card.layer.shadowColor = UIColor.black.cgColor
+        card.layer.shadowOpacity = 0.25
+        card.layer.shadowRadius = 10
+        card.layer.shadowOffset = CGSize(width: 0, height: 6)
         contentView.addSubview(card)
 
         iconBadge.translatesAutoresizingMaskIntoConstraints = false
-        iconBadge.font = .systemFont(ofSize: 26, weight: .bold)
+        iconBadge.font = .systemFont(ofSize: 25, weight: .bold)
         iconBadge.textColor = .white
         iconBadge.textAlignment = .center
         iconBadge.layer.cornerRadius = 14
         iconBadge.clipsToBounds = true
         card.addSubview(iconBadge)
+
+        faviconView.translatesAutoresizingMaskIntoConstraints = false
+        faviconView.contentMode = .scaleAspectFit
+        faviconView.layer.cornerRadius = 10
+        faviconView.clipsToBounds = true
+        faviconView.isHidden = true
+        iconBadge.addSubview(faviconView)
 
         tagLabel.translatesAutoresizingMaskIntoConstraints = false
         tagLabel.font = .systemFont(ofSize: 15, weight: .bold)
@@ -582,7 +726,7 @@ private final class StartPageTileCell: UICollectionViewCell {
 
         hostLabel.translatesAutoresizingMaskIntoConstraints = false
         hostLabel.font = .systemFont(ofSize: 17, weight: .regular)
-        hostLabel.textColor = UIColor.white.withAlphaComponent(0.6)
+        hostLabel.textColor = UIColor.white.withAlphaComponent(0.62)
         hostLabel.lineBreakMode = .byTruncatingTail
         card.addSubview(hostLabel)
 
@@ -594,8 +738,13 @@ private final class StartPageTileCell: UICollectionViewCell {
 
             iconBadge.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
             iconBadge.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            iconBadge.widthAnchor.constraint(equalToConstant: 48),
-            iconBadge.heightAnchor.constraint(equalToConstant: 48),
+            iconBadge.widthAnchor.constraint(equalToConstant: 52),
+            iconBadge.heightAnchor.constraint(equalToConstant: 52),
+
+            faviconView.topAnchor.constraint(equalTo: iconBadge.topAnchor, constant: 6),
+            faviconView.bottomAnchor.constraint(equalTo: iconBadge.bottomAnchor, constant: -6),
+            faviconView.leadingAnchor.constraint(equalTo: iconBadge.leadingAnchor, constant: 6),
+            faviconView.trailingAnchor.constraint(equalTo: iconBadge.trailingAnchor, constant: -6),
 
             tagLabel.centerYAnchor.constraint(equalTo: iconBadge.centerYAnchor),
             tagLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
@@ -614,14 +763,27 @@ private final class StartPageTileCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(title: String, urlString: String, badge: String?, badgeColor: UIColor, tint: UIColor) {
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        representedURLString = nil
+        faviconView.image = nil
+        faviconView.isHidden = true
+    }
+
+    func configure(title: String, urlString: String, badge: String?, badgeColor: UIColor) {
+        representedURLString = urlString
         let host = URL(string: urlString)?.host?.replacingOccurrences(of: "www.", with: "") ?? urlString
+        let brandTint = StartPageFaviconCache.domainTintColor(for: host)
         let letter = String((host.first ?? title.first ?? "W")).uppercased()
-        unfocusedCardBackground = UIColor.white.withAlphaComponent(0.10)
+
+        unfocusedCardBackground = brandTint.withAlphaComponent(0.18)
         iconBadge.text = letter
-        iconBadge.backgroundColor = tint
+        iconBadge.backgroundColor = brandTint
+        faviconView.image = nil
+        faviconView.isHidden = true
         titleLabel.text = title
         hostLabel.text = host
+
         if let badge = badge {
             tagLabel.isHidden = false
             tagLabel.backgroundColor = badgeColor
@@ -632,12 +794,23 @@ private final class StartPageTileCell: UICollectionViewCell {
         if !isFocused {
             card.backgroundColor = unfocusedCardBackground
         }
+
+        StartPageFaviconCache.shared.loadFavicon(for: urlString) { [weak self] img in
+            guard let self = self, self.representedURLString == urlString, let img = img else { return }
+            self.iconBadge.text = nil
+            self.iconBadge.backgroundColor = UIColor.white.withAlphaComponent(0.92)
+            self.faviconView.image = img
+            self.faviconView.isHidden = false
+        }
     }
 
     func configureAddTile() {
-        unfocusedCardBackground = UIColor.systemBlue.withAlphaComponent(0.18)
+        representedURLString = nil
+        unfocusedCardBackground = UIColor.systemBlue.withAlphaComponent(0.20)
         iconBadge.text = "+"
         iconBadge.backgroundColor = .systemBlue
+        faviconView.image = nil
+        faviconView.isHidden = true
         titleLabel.text = "Añadir acceso"
         hostLabel.text = "Página actual o URL"
         tagLabel.isHidden = false
@@ -651,17 +824,21 @@ private final class StartPageTileCell: UICollectionViewCell {
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
         coordinator.addCoordinatedAnimations({
             if self.isFocused {
-                self.card.transform = CGAffineTransform(scaleX: 1.06, y: 1.06)
+                self.card.transform = CGAffineTransform(scaleX: 1.07, y: 1.07)
                 self.card.backgroundColor = .white
                 self.card.layer.borderColor = UIColor.systemBlue.cgColor
+                self.card.layer.shadowOpacity = 0.55
+                self.card.layer.shadowRadius = 18
                 self.titleLabel.textColor = .black
                 self.hostLabel.textColor = UIColor.black.withAlphaComponent(0.65)
             } else {
                 self.card.transform = .identity
                 self.card.backgroundColor = self.unfocusedCardBackground
                 self.card.layer.borderColor = UIColor.clear.cgColor
+                self.card.layer.shadowOpacity = 0.25
+                self.card.layer.shadowRadius = 10
                 self.titleLabel.textColor = .white
-                self.hostLabel.textColor = UIColor.white.withAlphaComponent(0.6)
+                self.hostLabel.textColor = UIColor.white.withAlphaComponent(0.62)
             }
         }, completion: nil)
     }

@@ -123,7 +123,7 @@ final class BookmarksViewController: UIViewController, UITableViewDataSource, UI
             bottomFocusGuide.topAnchor.constraint(equalTo: closeButton.bottomAnchor),
             bottomFocusGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bottomFocusGuide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bottomFocusGuide.heightAnchor.constraint(equalToConstant: 24)
+            bottomFocusGuide.bottomAnchor.constraint(equalTo: tableView.topAnchor)
         ])
     }
 
@@ -176,6 +176,10 @@ final class BookmarksViewController: UIViewController, UITableViewDataSource, UI
             BrowserStore.shared.removeBookmark(at: indexPath.row)
             self?.tableView.deleteRows(at: [indexPath], with: .automatic)
             self?.updateEmptyState()
+            if BrowserStore.shared.bookmarks.isEmpty {
+                self?.setNeedsFocusUpdate()
+                self?.updateFocusIfNeeded()
+            }
         })
         alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
         present(alert, animated: true)

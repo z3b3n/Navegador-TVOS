@@ -30,6 +30,8 @@ final class VirtualCursorView: UIView {
     private let outerRing = CAShapeLayer()
     private let innerDotHalo = CAShapeLayer()
     private let innerDot = CAShapeLayer()
+    private let scrollArrowsHalo = CAShapeLayer()
+    private let scrollArrows = CAShapeLayer()
     private let textBeamHalo = CAShapeLayer()
     private let textBeam = CAShapeLayer()
 
@@ -73,6 +75,33 @@ final class VirtualCursorView: UIView {
         innerDot.path = UIBezierPath(ovalIn: dotRect).cgPath
         layer.addSublayer(innerDot)
 
+        // Subtle dual chevrons for Scroll Mode so it is instantly recognizable on bright or dark pages
+        let arrowsPath = UIBezierPath()
+        arrowsPath.move(to: CGPoint(x: bounds.midX - 5, y: 18))
+        arrowsPath.addLine(to: CGPoint(x: bounds.midX, y: 12))
+        arrowsPath.addLine(to: CGPoint(x: bounds.midX + 5, y: 18))
+        arrowsPath.move(to: CGPoint(x: bounds.midX - 5, y: bounds.height - 18))
+        arrowsPath.addLine(to: CGPoint(x: bounds.midX, y: bounds.height - 12))
+        arrowsPath.addLine(to: CGPoint(x: bounds.midX + 5, y: bounds.height - 18))
+
+        scrollArrowsHalo.path = arrowsPath.cgPath
+        scrollArrowsHalo.lineWidth = 5.0
+        scrollArrowsHalo.lineCap = .round
+        scrollArrowsHalo.lineJoin = .round
+        scrollArrowsHalo.strokeColor = UIColor(red: 0.04, green: 0.07, blue: 0.14, alpha: 0.92).cgColor
+        scrollArrowsHalo.fillColor = UIColor.clear.cgColor
+        scrollArrowsHalo.isHidden = true
+        layer.addSublayer(scrollArrowsHalo)
+
+        scrollArrows.path = arrowsPath.cgPath
+        scrollArrows.lineWidth = 2.4
+        scrollArrows.lineCap = .round
+        scrollArrows.lineJoin = .round
+        scrollArrows.strokeColor = UIColor.white.cgColor
+        scrollArrows.fillColor = UIColor.clear.cgColor
+        scrollArrows.isHidden = true
+        layer.addSublayer(scrollArrows)
+
         let beamPath = UIBezierPath()
         beamPath.move(to: CGPoint(x: bounds.midX, y: 11))
         beamPath.addLine(to: CGPoint(x: bounds.midX, y: bounds.height - 11))
@@ -104,6 +133,8 @@ final class VirtualCursorView: UIView {
             outerRing.isHidden = false
             innerDotHalo.isHidden = false
             innerDot.isHidden = false
+            scrollArrowsHalo.isHidden = false
+            scrollArrows.isHidden = false
             textBeamHalo.isHidden = true
             textBeam.isHidden = true
             outerRing.fillColor = UIColor.systemGreen.withAlphaComponent(0.32).cgColor
@@ -112,6 +143,9 @@ final class VirtualCursorView: UIView {
             UIView.animate(withDuration: 0.12) { self.transform = .identity }
             return
         }
+
+        scrollArrowsHalo.isHidden = true
+        scrollArrows.isHidden = true
 
         switch visualHint {
         case .normal:
