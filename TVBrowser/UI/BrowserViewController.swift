@@ -57,6 +57,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
     private var panStartPoint: CGPoint = .zero
     private var isWebInputFocused = false
     private var cachedCursorOverInnerScroll = false
+    private var cachedPageCanScrollUp = false
     private var pendingScrollDelta: CGPoint = .zero
     private var innerScrollInFlight = false
     private var lastHoverCheckTime: CFTimeInterval = 0
@@ -1750,8 +1751,7 @@ final class BrowserViewController: UIViewController, UIGestureRecognizerDelegate
         let scaledDX = delta.x / zoom
         let scaledDY = delta.y / zoom
 
-        if !cachedCursorOverInnerScroll {
-            let sv = engine.scrollView
+        if !cachedCursorOverInnerScroll, let sv = engine.scrollView {
             let minX = -sv.adjustedContentInset.left
             let minY = -sv.adjustedContentInset.top
             let maxX = max(minX, sv.contentSize.width - sv.bounds.width + sv.adjustedContentInset.right)
